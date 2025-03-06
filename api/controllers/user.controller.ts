@@ -1,0 +1,29 @@
+import { Request, Response } from 'express';
+import client from '../../utils/database';
+
+interface User {
+  id: string;
+}
+
+export const getUserProfile =  async (req: Request, res: Response) => {
+    try {
+      
+      if (!req.user) {
+         res.status(401).json({ message: 'Unauthorized' });
+         return;
+      }
+      const userId = (req.user as User).id;
+
+      const { rows } = await client.query('SELECT * FROM users WHERE id = $1', [userId]);
+
+      if (rows.length === 0) {
+         res.status(404).json({ message: 'User not found' });
+         return;
+      }
+
+      res.status(200).json(rows[0]); // Retourner le profil de l'utilisateur
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ message: 'Internal server error' });
+    }
+  };
