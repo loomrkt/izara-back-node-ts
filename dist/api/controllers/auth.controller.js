@@ -18,8 +18,8 @@ const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const database_1 = __importDefault(require("../../utils/database"));
 const passport_1 = __importDefault(require("passport"));
 const passport_google_oauth20_1 = require("passport-google-oauth20");
-const ACCESS_TOKEN_EXPIRES_IN = '15m';
-const REFRESH_TOKEN_EXPIRES_IN = '7d';
+const ACCESS_TOKEN_EXPIRES_IN = "15m";
+const REFRESH_TOKEN_EXPIRES_IN = "7d";
 passport_1.default.use(new passport_google_oauth20_1.Strategy({
     clientID: process.env.GOOGLE_CLIENT_ID,
     clientSecret: process.env.GOOGLE_CLIENT_SECRET,
@@ -39,22 +39,30 @@ passport_1.default.use(new passport_google_oauth20_1.Strategy({
         done(error, false);
     }
 })));
-exports.loginWithGoogle = passport_1.default.authenticate("google", { scope: ["profile", "email"] });
+exports.loginWithGoogle = passport_1.default.authenticate("google", {
+    scope: ["profile", "email"],
+});
 const googleCallback = (req, res) => {
     passport_1.default.authenticate("google", { session: false }, (err, user) => __awaiter(void 0, void 0, void 0, function* () {
         if (err || !user) {
             return res.status(401).json({ message: "Authentication failed" });
         }
-        const accessToken = jsonwebtoken_1.default.sign({ id: user.id, type: 'access' }, process.env.JWT_SECRET, { expiresIn: ACCESS_TOKEN_EXPIRES_IN });
-        const refreshToken = jsonwebtoken_1.default.sign({ id: user.id, type: 'refresh' }, process.env.JWT_SECRET, { expiresIn: REFRESH_TOKEN_EXPIRES_IN });
-        yield database_1.default.query('INSERT INTO refresh_tokens (user_id, token, expires_at) VALUES ($1, $2, NOW() + INTERVAL \'7 days\')', [user.id, refreshToken]);
+        const accessToken = jsonwebtoken_1.default.sign({ id: user.id, type: "access" }, process.env.JWT_SECRET, { expiresIn: ACCESS_TOKEN_EXPIRES_IN });
+        const refreshToken = jsonwebtoken_1.default.sign({ id: user.id, type: "refresh" }, process.env.JWT_SECRET, { expiresIn: REFRESH_TOKEN_EXPIRES_IN });
         res.cookie("accessToken", accessToken, {
             httpOnly: true,
-            secure: process.env.NODE_ENV === 'production',
-            sameSite: 'strict',
+            secure: process.env.NODE_ENV === "production",
+            sameSite: "strict",
             maxAge: 15 * 60 * 1000,
         });
-        const redirectUrl = `${process.env.FRONTEND_URL}/dashboard` || 'http://localhost:4200/dashboard';
+        res.cookie("refreshToken", refreshToken, {
+            httpOnly: true,
+            secure: process.env.NODE_ENV === "production",
+            sameSite: "strict",
+            maxAge: 7 * 24 * 60 * 60 * 1000,
+        });
+        const redirectUrl = `${process.env.FRONTEND_URL}/dashboard` ||
+            "http://localhost:4200/dashboard";
         res.redirect(redirectUrl);
     }))(req, res);
 };
@@ -64,40 +72,44 @@ const login = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
         const { email, password } = req.body;
         // Validation des entrées
         if (!email || !password) {
-            res.status(400).json({ message: 'Email and password are required' });
+            res.status(400).json({ message: "Email and password are required" });
             return;
         }
         // Récupérer l'utilisateur depuis la base de données
-        const { rows } = yield database_1.default.query('SELECT * FROM users WHERE email = $1', [email]);
+        const { rows } = yield database_1.default.query("SELECT * FROM users WHERE email = $1", [email]);
         if (rows.length === 0) {
-            res.status(401).json({ error: 'User  not found' });
+            res.status(401).json({ error: "User  not found" });
             return;
         }
         const user = rows[0];
         // Comparer le mot de passe fourni avec le mot de passe haché
         const isMatch = yield bcryptjs_1.default.compare(password, user.password);
         if (!isMatch) {
-            res.status(401).json({ error: 'Invalid credentials' });
+            res.status(401).json({ error: "Invalid credentials" });
             return;
         }
         // Générer les jetons JWT
-        const accessToken = jsonwebtoken_1.default.sign({ id: user.id, type: 'access' }, process.env.JWT_SECRET, { expiresIn: ACCESS_TOKEN_EXPIRES_IN });
-        const refreshToken = jsonwebtoken_1.default.sign({ id: user.id, type: 'refresh' }, process.env.JWT_SECRET, { expiresIn: REFRESH_TOKEN_EXPIRES_IN });
-        // Stocker le refresh token dans la base de données (optionnel)
-        yield database_1.default.query('INSERT INTO refresh_tokens (user_id, token, expires_at) VALUES ($1, $2, NOW() + INTERVAL \'7 days\')', [user.id, refreshToken]);
+        const accessToken = jsonwebtoken_1.default.sign({ id: user.id, type: "access" }, process.env.JWT_SECRET, { expiresIn: ACCESS_TOKEN_EXPIRES_IN });
+        const refreshToken = jsonwebtoken_1.default.sign({ id: user.id, type: "refresh" }, process.env.JWT_SECRET, { expiresIn: REFRESH_TOKEN_EXPIRES_IN });
         // Définir le cookie et envoyer la réponse
-        res.cookie('accessToken', accessToken, {
+        res.cookie("accessToken", accessToken, {
             httpOnly: true,
-            secure: process.env.NODE_ENV === 'production',
-            sameSite: 'strict',
+            secure: process.env.NODE_ENV === "production",
+            sameSite: "strict",
             maxAge: 15 * 60 * 1000,
         });
-        res.status(201).json({ message: 'Logged in successfully' });
+        res.cookie("refreshToken", refreshToken, {
+            httpOnly: true,
+            secure: process.env.NODE_ENV === "production",
+            sameSite: "strict",
+            maxAge: 7 * 24 * 60 * 60 * 1000,
+        });
+        res.status(201).json({ message: "Logged in successfully" });
         return;
     }
     catch (error) {
-        console.error('Login error:', error);
-        res.status(500).json({ error: 'Internal server error' });
+        console.error("Login error:", error);
+        res.status(500).json({ error: "Internal server error" });
         return;
     }
 });
@@ -134,67 +146,59 @@ const register = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
 });
 exports.register = register;
 const refreshToken = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    req.cookies['accessToken'];
-    const decoded = jsonwebtoken_1.default.verify(req.cookies['accessToken'], process.env.JWT_SECRET);
-    const userId = decoded.id;
-    const { rows } = yield database_1.default.query('SELECT token FROM refresh_tokens WHERE user_id = $1', [userId]);
-    const refreshToken = rows[0].token;
+    const refreshToken = req.cookies["refreshToken"];
     if (!refreshToken) {
-        res.status(401).json({ error: 'Refresh token required' });
+        res.status(401).json({ error: "Refresh token required" });
         return;
     }
     try {
         const decoded = jsonwebtoken_1.default.verify(refreshToken, process.env.JWT_SECRET);
-        if (decoded.type !== 'refresh') {
-            res.status(401).json({ error: 'Invalid refresh token type' });
+        if (decoded.type !== "refresh") {
+            res.status(401).json({ error: "Invalid refresh token type" });
             return;
         }
-        const newAccessToken = jsonwebtoken_1.default.sign({ id: decoded.id, type: 'access' }, process.env.JWT_SECRET, { expiresIn: '15m' });
-        res.cookie('accessToken', newAccessToken, {
+        if (decoded.expiresIn < Math.floor(Date.now() / 1000)) {
+            res.status(401).json({ error: "Refresh token expiré" });
+            return;
+        }
+        const newAccessToken = jsonwebtoken_1.default.sign({ id: decoded.id, type: "access" }, process.env.JWT_SECRET, { expiresIn: ACCESS_TOKEN_EXPIRES_IN });
+        const newRefreshToken = jsonwebtoken_1.default.sign({ id: decoded.id, type: "refresh" }, process.env.JWT_SECRET, { expiresIn: REFRESH_TOKEN_EXPIRES_IN });
+        res.cookie("accessToken", newAccessToken, {
             httpOnly: true,
-            secure: process.env.NODE_ENV === 'production',
-            sameSite: 'strict',
+            secure: process.env.NODE_ENV === "production",
+            sameSite: "strict",
             maxAge: 15 * 60 * 1000,
         });
-        res.status(200).json({ message: 'Access token refreshed' });
+        res.clearCookie("refreshToken");
+        res.cookie("refreshToken", newRefreshToken, {
+            httpOnly: true,
+            secure: process.env.NODE_ENV === "production",
+            sameSite: "strict",
+            maxAge: 7 * 24 * 60 * 60 * 1000,
+        });
+        res.status(200).json({ message: "Access token refreshed" });
         return;
     }
     catch (error) {
-        res.status(403).json({ error: 'Invalid or expired refresh token' });
+        res.status(403).json({ error: "Invalid or expired refresh token" });
         return;
     }
 });
 exports.refreshToken = refreshToken;
 const logout = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
-        const accessToken = req.cookies['accessToken'];
-        console.log(accessToken);
-        const decoded = jsonwebtoken_1.default.verify(accessToken, process.env.JWT_SECRET, { ignoreExpiration: true });
-        yield database_1.default.query('DELETE FROM refresh_tokens WHERE user_id = $1', [decoded.id]);
-        // Supprimer le cookie
-        res.clearCookie('accessToken');
-        res.json({ message: 'Logged out successfully' });
+        res.clearCookie("accessToken");
+        res.clearCookie("refreshToken");
+        res.json({ message: "Logged out successfully" });
     }
     catch (error) {
-        console.error('Logout error:', error);
-        res.status(401).json({ error: 'Invalid token' });
+        console.error("Logout error:", error);
+        res.status(401).json({ error: "Invalid token" });
     }
 });
 exports.logout = logout;
 const checkAuth = (req, res) => {
-    const accessToken = req.cookies['accessToken'];
-    if (!accessToken) {
-        res.json({ authenticated: false });
-        return;
-    }
-    try {
-        jsonwebtoken_1.default.verify(accessToken, process.env.JWT_SECRET);
-        res.json({ authenticated: true });
-        return;
-    }
-    catch (error) {
-        res.status(401).json({ authenticated: false });
-        return;
-    }
+    // Si le middleware vérifie que l'AT est valide, on peut accéder à cette route
+    res.status(200).json({ authenticated: true });
 };
 exports.checkAuth = checkAuth;

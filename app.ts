@@ -7,7 +7,7 @@ import cookieParser from "cookie-parser";
 import cors from "cors";
 import AuthRoute from "./api/routes/auth.routes";
 import UserRoute from "./api/routes/user.routes";
-
+import filesRoute from "./api/routes/files.routes";
 dotenv.config();
 const app = express();
 
@@ -38,5 +38,6 @@ app.get("/", (req, res) => {
 
 app.use("/auth", AuthRoute);
 app.use("/user", UserRoute);
+app.use("/files", filesRoute);
 
 export default app;

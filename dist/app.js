@@ -12,6 +12,7 @@ const cookie_parser_1 = __importDefault(require("cookie-parser"));
 const cors_1 = __importDefault(require("cors"));
 const auth_routes_1 = __importDefault(require("./api/routes/auth.routes"));
 const user_routes_1 = __importDefault(require("./api/routes/user.routes"));
+const files_routes_1 = __importDefault(require("./api/routes/files.routes"));
 dotenv_1.default.config();
 const app = (0, express_1.default)();
 app.use((0, cors_1.default)({
@@ -34,4 +35,5 @@ app.get("/", (req, res) => {
 });
 app.use("/auth", auth_routes_1.default);
 app.use("/user", user_routes_1.default);
+app.use("/files", files_routes_1.default);
 exports.default = app;

@@ -9,19 +9,26 @@ const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const verifyAccessToken = (req, res, next) => {
     // Récupérer le token depuis les cookies
     const accessToken = req.cookies['accessToken'];
+    console.log(accessToken);
     // Vérifier si le token est présent
     if (!accessToken) {
-        res.status(401).json({ message: 'Access token is missing' });
+        res.status(401).json({ message: "Access token is missing" });
         return;
     }
     try {
         // Vérifier la validité du token
         const decoded = jsonwebtoken_1.default.verify(accessToken, process.env.JWT_SECRET);
+        // Vérifier l'expiration de l'AT
+        if (decoded.expiresIn < Math.floor(Date.now() / 1000)) {
+            res.status(401).json({ error: "Token expiré" });
+            return;
+        }
+        console.log(decoded);
         req.user = decoded;
         next(); // Passer au prochain middleware ou route
     }
     catch (error) {
-        res.status(401).json({ message: 'Invalid or expired access token' });
+        res.status(401).json({ message: "Invalid or expired access token" });
         return;
     }
 };
