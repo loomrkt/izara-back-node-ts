@@ -3,70 +3,87 @@ import client from "../../utils/database";
 import {firebaseConfig} from "../../utils/firebase";
 import { initializeApp } from "firebase/app";
 import { getStorage, ref, getDownloadURL, uploadBytesResumable , deleteObject } from "firebase/storage";
+import archiver from "archiver";
+import { PassThrough } from "stream";
+
 interface User {
-    id: string;
-  }
+  id: string;
+}
 
 initializeApp(firebaseConfig);
 const storage = getStorage();
 
 // Get files for current user
 export const getFiles = async (req: Request, res: Response) => {
-    try {
-        const { rows } = await client.query(
-            "SELECT * FROM files WHERE user_id = $1", 
-            [(req.user as User).id]
-        );
-        res.status(200).json(rows);
-    } catch (error) {
-        console.error(error);
-        res.status(500).json({ message: "Internal server error" });
-    }
+  try {
+    const { rows } = await client.query(
+      "SELECT * FROM files WHERE user_id = $1",
+      [(req.user as User).id]
+    );
+    res.status(200).json(rows);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Internal server error" });
+  }
 };
 
 // Create file with user association
 export const createFile = async (req: Request, res: Response) => {
-    try {
-        const { titre } = req.body;
-        const userId = (req.user as User).id;
+  try {
+    const { titre } = req.body;
+    const userId = (req.user as User).id;
 
-        if (!req.file) {
-             res.status(400).json({ error: 'Aucun fichier fourni.' });
-             return;
-          }
-          const dateTime = giveCurrentDateTime();
-
-          const storageRef = ref(storage, `files/${req.file.originalname + "       " + dateTime}`);
-  
-          // Create file metadata including the content type
-          const metadata = {
-              contentType: req.file.mimetype,
-          };
-  
-          // Upload the file in the bucket storage
-          const snapshot = await uploadBytesResumable(storageRef, req.file.buffer, metadata);
-          //by using uploadBytesResumable we can control the progress of uploading like pause, resume, cancel
-  
-          // Grab the public url
-          const downloadURL = await getDownloadURL(snapshot.ref);
-  
-          const { rows } = await client.query(
-            `INSERT INTO files 
-            (titre, file_url, expiration_date, user_id) 
-            VALUES ($1, $2, NOW() + INTERVAL '7 days', $3)
-            RETURNING *`,
-            [titre, downloadURL, userId]
-        );
-        
-        res.status(201).json(rows[0]);
-          return;
-
-    } catch (error) {
-        console.error(error);
-        res.status(500).json({ message: "Internal server error" });
+    if (!req.file) {
+      res.status(400).json({ error: "Aucun fichier fourni." });
+      return;
     }
-};
 
+    const dateTime = giveCurrentDateTime();
+
+    // Créer un flux pour l'archive
+    const pass = new PassThrough();
+    const archive = archiver("zip", { zlib: { level: 9 } });
+
+    // Lorsque l'archive est terminée, fermez le flux
+    archive.on("end", () => {
+      console.log("Archive complète");
+    });
+
+    // Pipe l'archive vers le flux
+    archive.pipe(pass);
+    archive.append(req.file.buffer, { name: req.file.originalname });
+    archive.finalize();
+
+    const storageRef = ref(storage, `files/${titre + dateTime}.zip`);
+
+    // Créer les métadonnées du fichier
+    const metadata = {
+      contentType: "application/zip", // Changez le type de contenu si vous utilisez .rar
+    };
+
+    // Télécharger le fichier dans le stockage
+    const chunks: Buffer[] = [];
+    pass.on("data", (chunk) => chunks.push(chunk));
+    pass.on("end", async () => {
+      const buffer = Buffer.concat(chunks);
+      const snapshot = await uploadBytesResumable(storageRef, buffer, metadata);
+      const downloadURL = await getDownloadURL(snapshot.ref);
+      const taille = snapshot.bytesTransferred;
+      const { rows } = await client.query(
+        `INSERT INTO files 
+              (titre, file_url, expiration_date, user_id, taille) 
+              VALUES ($1, $2, NOW() + INTERVAL '7 days', $3, $4)
+              RETURNING *`,
+        [titre, downloadURL, userId, taille]
+      );
+
+      res.status(201).json(rows[0]);
+    });
+  } catch (error) {
+    console.log(`Erreur lors de la création du fichier : ${error}`);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
 
 
 // Delete file with ownership check

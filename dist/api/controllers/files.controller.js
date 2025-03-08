@@ -17,6 +17,8 @@ const database_1 = __importDefault(require("../../utils/database"));
 const firebase_1 = require("../../utils/firebase");
 const app_1 = require("firebase/app");
 const storage_1 = require("firebase/storage");
+const archiver_1 = __importDefault(require("archiver"));
+const stream_1 = require("stream");
 (0, app_1.initializeApp)(firebase_1.firebaseConfig);
 const storage = (0, storage_1.getStorage)();
 // Get files for current user
@@ -37,29 +39,43 @@ const createFile = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
         const { titre } = req.body;
         const userId = req.user.id;
         if (!req.file) {
-            res.status(400).json({ error: 'Aucun fichier fourni.' });
+            res.status(400).json({ error: "Aucun fichier fourni." });
             return;
         }
         const dateTime = giveCurrentDateTime();
-        const storageRef = (0, storage_1.ref)(storage, `files/${req.file.originalname + "       " + dateTime}`);
-        // Create file metadata including the content type
+        // Créer un flux pour l'archive
+        const pass = new stream_1.PassThrough();
+        const archive = (0, archiver_1.default)("zip", { zlib: { level: 9 } });
+        // Lorsque l'archive est terminée, fermez le flux
+        archive.on("end", () => {
+            console.log("Archive complète");
+        });
+        // Pipe l'archive vers le flux
+        archive.pipe(pass);
+        archive.append(req.file.buffer, { name: req.file.originalname });
+        archive.finalize();
+        const storageRef = (0, storage_1.ref)(storage, `files/${titre + dateTime}.zip`);
+        // Créer les métadonnées du fichier
         const metadata = {
-            contentType: req.file.mimetype,
+            contentType: "application/zip", // Changez le type de contenu si vous utilisez .rar
         };
-        // Upload the file in the bucket storage
-        const snapshot = yield (0, storage_1.uploadBytesResumable)(storageRef, req.file.buffer, metadata);
-        //by using uploadBytesResumable we can control the progress of uploading like pause, resume, cancel
-        // Grab the public url
-        const downloadURL = yield (0, storage_1.getDownloadURL)(snapshot.ref);
-        const { rows } = yield database_1.default.query(`INSERT INTO files 
-            (titre, file_url, expiration_date, user_id) 
-            VALUES ($1, $2, NOW() + INTERVAL '7 days', $3)
-            RETURNING *`, [titre, downloadURL, userId]);
-        res.status(201).json(rows[0]);
-        return;
+        // Télécharger le fichier dans le stockage
+        const chunks = [];
+        pass.on("data", (chunk) => chunks.push(chunk));
+        pass.on("end", () => __awaiter(void 0, void 0, void 0, function* () {
+            const buffer = Buffer.concat(chunks);
+            const snapshot = yield (0, storage_1.uploadBytesResumable)(storageRef, buffer, metadata);
+            const downloadURL = yield (0, storage_1.getDownloadURL)(snapshot.ref);
+            const taille = snapshot.bytesTransferred;
+            const { rows } = yield database_1.default.query(`INSERT INTO files 
+              (titre, file_url, expiration_date, user_id, taille) 
+              VALUES ($1, $2, NOW() + INTERVAL '7 days', $3, $4)
+              RETURNING *`, [titre, downloadURL, userId, taille]);
+            res.status(201).json(rows[0]);
+        }));
     }
     catch (error) {
-        console.error(error);
+        console.log(`Erreur lors de la création du fichier : ${error}`);
         res.status(500).json({ message: "Internal server error" });
     }
 });
