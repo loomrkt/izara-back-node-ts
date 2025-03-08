@@ -1,13 +1,17 @@
 import express from "express";
 import { upload } from "../../utils/multer";
-import { getFiles, createFile,deleteFile } from "../controllers/files.controller";
-import { verifyAccessToken } from '../../middlewares/auth.middleware';
+import {
+  getFiles,
+  createFile,
+  deleteFile,
+  unshorteen,
+} from "../controllers/files.controller";
+import { verifyAccessToken } from "../../middlewares/auth.middleware";
 
 const router = express.Router();
 
-router.use(verifyAccessToken);
-router.get('/', getFiles);
-router.post('/',upload.single('file'), createFile);
-router.delete('/:id', deleteFile);
-
+router.get("/", verifyAccessToken, getFiles);
+router.get("/:hash", unshorteen);
+router.post("/", verifyAccessToken, upload.single("file"), createFile);
+router.delete("/:id", verifyAccessToken, deleteFile);
 export default router;
