@@ -87,11 +87,13 @@ const googleCallback = (req, res) => {
         res.cookie("accessToken", accessToken, {
             httpOnly: true,
             secure: process.env.NODE_ENV === "production",
+            sameSite: "none",
             maxAge: 15 * 60 * 1000,
         });
         res.cookie("refreshToken", refreshToken, {
             httpOnly: true,
             secure: process.env.NODE_ENV === "production",
+            sameSite: "none",
             maxAge: 7 * 24 * 60 * 60 * 1000,
         });
         const redirectUrl = `${process.env.FRONTEND_URL}/dashboard` ||
@@ -128,11 +130,13 @@ const login = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
         res.cookie("accessToken", accessToken, {
             httpOnly: true,
             secure: process.env.NODE_ENV === "production",
+            sameSite: "none",
             maxAge: 15 * 60 * 1000,
         });
         res.cookie("refreshToken", refreshToken, {
             httpOnly: true,
             secure: process.env.NODE_ENV === "production",
+            sameSite: "none",
             maxAge: 7 * 24 * 60 * 60 * 1000,
         });
         res.status(201).json({ message: "Logged in successfully" });
@@ -197,12 +201,14 @@ const refreshToken = (req, res) => __awaiter(void 0, void 0, void 0, function* (
         res.cookie("accessToken", newAccessToken, {
             httpOnly: true,
             secure: process.env.NODE_ENV === "production",
+            sameSite: "none",
             maxAge: 15 * 60 * 1000,
         });
         res.clearCookie("refreshToken");
         res.cookie("refreshToken", newRefreshToken, {
             httpOnly: true,
             secure: process.env.NODE_ENV === "production",
+            sameSite: "none",
             maxAge: 7 * 24 * 60 * 60 * 1000,
         });
         res.status(200).json({ message: "Access token refreshed" });
