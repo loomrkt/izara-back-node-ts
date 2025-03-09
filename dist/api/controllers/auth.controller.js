@@ -222,8 +222,18 @@ const refreshToken = (req, res) => __awaiter(void 0, void 0, void 0, function* (
 exports.refreshToken = refreshToken;
 const logout = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
-        res.clearCookie("accessToken");
-        res.clearCookie("refreshToken");
+        res.clearCookie("accessToken", {
+            httpOnly: true,
+            secure: process.env.NODE_ENV === "production",
+            sameSite: "none",
+            path: "/",
+        });
+        res.clearCookie("refreshToken", {
+            httpOnly: true,
+            secure: process.env.NODE_ENV === "production",
+            sameSite: "none",
+            path: "/",
+        });
         res.json({ message: "Logged out successfully" });
     }
     catch (error) {

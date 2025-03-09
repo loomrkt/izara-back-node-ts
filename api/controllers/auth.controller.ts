@@ -248,14 +248,27 @@
 
   export const logout = async (req: Request, res: Response) => {
     try {
-      res.clearCookie("accessToken");
-      res.clearCookie("refreshToken");
+      res.clearCookie("accessToken", {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "none",
+        path: "/",
+      });
+
+      res.clearCookie("refreshToken", {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "none",
+        path: "/",
+      });
+
       res.json({ message: "Logged out successfully" });
     } catch (error) {
       console.error("Logout error:", error);
       res.status(401).json({ error: "Invalid token" });
     }
   };
+  
 
   export const checkAuth = (req: Request, res: Response) => {
     // Si le middleware vérifie que l'AT est valide, on peut accéder à cette route
