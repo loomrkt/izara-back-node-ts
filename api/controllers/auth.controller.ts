@@ -14,7 +14,7 @@
       {
         clientID: process.env.GOOGLE_CLIENT_ID as string,
         clientSecret: process.env.GOOGLE_CLIENT_SECRET as string,
-        callbackURL: "/auth/google/callback",
+        callbackURL: `${process.env.BACKEND_URL}/auth/google/callback`,
       },
       async (accessToken, refreshToken, profile, done) => {
         try {
