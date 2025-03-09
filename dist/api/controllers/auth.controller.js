@@ -65,7 +65,7 @@ passport_1.default.use(new passport_google_oauth20_1.Strategy({
         const { rows } = yield database_1.default.query("SELECT * FROM users WHERE email = $1", [(_a = profile.emails) === null || _a === void 0 ? void 0 : _a[0].value]);
         let user = rows[0];
         if (!user) {
-            const { rows: newUser } = yield database_1.default.query("INSERT INTO users (email, google_id) VALUES ($1, $2) RETURNING *", [(_b = profile.emails) === null || _b === void 0 ? void 0 : _b[0].value, profile.id]);
+            const { rows: newUser } = yield database_1.default.query("INSERT INTO users (email) VALUES ($1) RETURNING *", [(_b = profile.emails) === null || _b === void 0 ? void 0 : _b[0].value]);
             user = newUser[0];
         }
         done(null, user);

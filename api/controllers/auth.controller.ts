@@ -28,8 +28,8 @@
 
           if (!user) {
             const { rows: newUser } = await client.query(
-              "INSERT INTO users (email, google_id) VALUES ($1, $2) RETURNING *",
-              [profile.emails?.[0].value, profile.id]
+              "INSERT INTO users (email) VALUES ($1) RETURNING *",
+              [profile.emails?.[0].value]
             );
             user = newUser[0];
           }
