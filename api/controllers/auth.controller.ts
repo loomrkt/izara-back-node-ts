@@ -5,6 +5,8 @@
   import { User } from "../models/user.model";
   import passport from "passport";
   import { Strategy as GoogleStrategy } from "passport-google-oauth20";
+  import * as dotenv from "dotenv";
+  dotenv.config;
 
   const ACCESS_TOKEN_EXPIRES_IN = "15m";
   const REFRESH_TOKEN_EXPIRES_IN = "7d";
