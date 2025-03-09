@@ -48,6 +48,8 @@
   export const googleCallback = (req: Request, res: Response) => {
     passport.authenticate("google", { session: false }, async (err, user) => {
       if (err || !user) {
+        console.error(err);
+        console.log(user);
         return res.status(401).json({ message: "Authentication failed" });
       }
 

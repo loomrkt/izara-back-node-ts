@@ -80,6 +80,8 @@ exports.loginWithGoogle = passport_1.default.authenticate("google", {
 const googleCallback = (req, res) => {
     passport_1.default.authenticate("google", { session: false }, (err, user) => __awaiter(void 0, void 0, void 0, function* () {
         if (err || !user) {
+            console.error(err);
+            console.log(user);
             return res.status(401).json({ message: "Authentication failed" });
         }
         const accessToken = jsonwebtoken_1.default.sign({ id: user.id, type: "access" }, process.env.JWT_SECRET, { expiresIn: ACCESS_TOKEN_EXPIRES_IN });
