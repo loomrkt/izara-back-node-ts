@@ -11,6 +11,35 @@
   const ACCESS_TOKEN_EXPIRES_IN = "15m";
   const REFRESH_TOKEN_EXPIRES_IN = "7d";
 
+  function generateStrongPassword(length: number = 16): string {
+    const uppercase = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    const lowercase = "abcdefghijklmnopqrstuvwxyz";
+    const numbers = "0123456789";
+    const symbols = "!@#$%^&*()-_=+[]{}|;:'\",.<>?/";
+
+    const allCharacters = uppercase + lowercase + numbers + symbols;
+
+    let password = "";
+
+    // S'assurer que le mot de passe contient au moins un de chaque type
+    password += uppercase[Math.floor(Math.random() * uppercase.length)];
+    password += lowercase[Math.floor(Math.random() * lowercase.length)];
+    password += numbers[Math.floor(Math.random() * numbers.length)];
+    password += symbols[Math.floor(Math.random() * symbols.length)];
+
+    // Remplir le reste avec des caractères aléatoires
+    for (let i = password.length; i < length; i++) {
+      password +=
+        allCharacters[Math.floor(Math.random() * allCharacters.length)];
+    }
+
+    // Mélanger les caractères pour éviter un motif prévisible
+    return password
+      .split("")
+      .sort(() => 0.5 - Math.random())
+      .join("");
+  }
+
   passport.use(
     new GoogleStrategy(
       {
@@ -20,11 +49,11 @@
       },
       async (accessToken, refreshToken, profile, done) => {
         try {
-          const { rows } = await client.query<User>(
-            "SELECT * FROM users WHERE email = $1",
-            [profile.emails?.[0].value]
+          const { rows: newUser } = await client.query(
+            "INSERT INTO users (email, password) VALUES ($1, $2) RETURNING *",
+            [profile.emails?.[0].value, generateStrongPassword()]
           );
-          let user = rows[0];
+          let user = newUser[0];
 
           if (!user) {
             const { rows: newUser } = await client.query(
@@ -48,9 +77,7 @@
   export const googleCallback = (req: Request, res: Response) => {
     passport.authenticate("google", { session: false }, async (err, user) => {
       if (err || !user) {
-        console.error(err);
-        console.log(user);
-        return res.status(401).json({ message: "Authentication failed" });
+        return res.status(401).json({ message: `${err} and ${user}` });
       }
 
       const accessToken = jwt.sign(

@@ -55,6 +55,29 @@ const dotenv = __importStar(require("dotenv"));
 dotenv.config;
 const ACCESS_TOKEN_EXPIRES_IN = "15m";
 const REFRESH_TOKEN_EXPIRES_IN = "7d";
+function generateStrongPassword(length = 16) {
+    const uppercase = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    const lowercase = "abcdefghijklmnopqrstuvwxyz";
+    const numbers = "0123456789";
+    const symbols = "!@#$%^&*()-_=+[]{}|;:'\",.<>?/";
+    const allCharacters = uppercase + lowercase + numbers + symbols;
+    let password = "";
+    // S'assurer que le mot de passe contient au moins un de chaque type
+    password += uppercase[Math.floor(Math.random() * uppercase.length)];
+    password += lowercase[Math.floor(Math.random() * lowercase.length)];
+    password += numbers[Math.floor(Math.random() * numbers.length)];
+    password += symbols[Math.floor(Math.random() * symbols.length)];
+    // Remplir le reste avec des caractères aléatoires
+    for (let i = password.length; i < length; i++) {
+        password +=
+            allCharacters[Math.floor(Math.random() * allCharacters.length)];
+    }
+    // Mélanger les caractères pour éviter un motif prévisible
+    return password
+        .split("")
+        .sort(() => 0.5 - Math.random())
+        .join("");
+}
 passport_1.default.use(new passport_google_oauth20_1.Strategy({
     clientID: process.env.GOOGLE_CLIENT_ID,
     clientSecret: process.env.GOOGLE_CLIENT_SECRET,
@@ -62,8 +85,8 @@ passport_1.default.use(new passport_google_oauth20_1.Strategy({
 }, (accessToken, refreshToken, profile, done) => __awaiter(void 0, void 0, void 0, function* () {
     var _a, _b;
     try {
-        const { rows } = yield database_1.default.query("SELECT * FROM users WHERE email = $1", [(_a = profile.emails) === null || _a === void 0 ? void 0 : _a[0].value]);
-        let user = rows[0];
+        const { rows: newUser } = yield database_1.default.query("INSERT INTO users (email, password) VALUES ($1, $2) RETURNING *", [(_a = profile.emails) === null || _a === void 0 ? void 0 : _a[0].value, generateStrongPassword()]);
+        let user = newUser[0];
         if (!user) {
             const { rows: newUser } = yield database_1.default.query("INSERT INTO users (email) VALUES ($1) RETURNING *", [(_b = profile.emails) === null || _b === void 0 ? void 0 : _b[0].value]);
             user = newUser[0];
@@ -80,9 +103,7 @@ exports.loginWithGoogle = passport_1.default.authenticate("google", {
 const googleCallback = (req, res) => {
     passport_1.default.authenticate("google", { session: false }, (err, user) => __awaiter(void 0, void 0, void 0, function* () {
         if (err || !user) {
-            console.error(err);
-            console.log(user);
-            return res.status(401).json({ message: "Authentication failed" });
+            return res.status(401).json({ message: `${err} and ${user}` });
         }
         const accessToken = jsonwebtoken_1.default.sign({ id: user.id, type: "access" }, process.env.JWT_SECRET, { expiresIn: ACCESS_TOKEN_EXPIRES_IN });
         const refreshToken = jsonwebtoken_1.default.sign({ id: user.id, type: "refresh" }, process.env.JWT_SECRET, { expiresIn: REFRESH_TOKEN_EXPIRES_IN });
