@@ -50,15 +50,15 @@
       async (accessToken, refreshToken, profile, done) => {
         try {
           const { rows: newUser } = await client.query(
-            "INSERT INTO users (email, password) VALUES ($1, $2) RETURNING *",
-            [profile.emails?.[0].value, generateStrongPassword()]
+            "SELECT * FROM users WHERE email = $1 OR google_id = $2",
+            [profile.emails?.[0].value, profile.id]
           );
           let user = newUser[0];
 
           if (!user) {
             const { rows: newUser } = await client.query(
-              "INSERT INTO users (email) VALUES ($1) RETURNING *",
-              [profile.emails?.[0].value]
+              "INSERT INTO users (email,google_id,password) VALUES ($1, $2, $3) RETURNING *",
+              [profile.emails?.[0].value, profile.id, generateStrongPassword()]
             );
             user = newUser[0];
           }

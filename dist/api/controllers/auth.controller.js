@@ -85,10 +85,10 @@ passport_1.default.use(new passport_google_oauth20_1.Strategy({
 }, (accessToken, refreshToken, profile, done) => __awaiter(void 0, void 0, void 0, function* () {
     var _a, _b;
     try {
-        const { rows: newUser } = yield database_1.default.query("INSERT INTO users (email, password) VALUES ($1, $2) RETURNING *", [(_a = profile.emails) === null || _a === void 0 ? void 0 : _a[0].value, generateStrongPassword()]);
+        const { rows: newUser } = yield database_1.default.query("SELECT * FROM users WHERE email = $1 OR google_id = $2", [(_a = profile.emails) === null || _a === void 0 ? void 0 : _a[0].value, profile.id]);
         let user = newUser[0];
         if (!user) {
-            const { rows: newUser } = yield database_1.default.query("INSERT INTO users (email) VALUES ($1) RETURNING *", [(_b = profile.emails) === null || _b === void 0 ? void 0 : _b[0].value]);
+            const { rows: newUser } = yield database_1.default.query("INSERT INTO users (email,google_id,password) VALUES ($1, $2, $3) RETURNING *", [(_b = profile.emails) === null || _b === void 0 ? void 0 : _b[0].value, profile.id, generateStrongPassword()]);
             user = newUser[0];
         }
         done(null, user);
