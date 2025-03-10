@@ -149,7 +149,7 @@ export const deleteFile = async (req: Request, res: Response) => {
       .single(); // Récupère un seul fichier
 
     if (selectError || !file) {
-       res.status(404).json({
+      res.status(404).json({
         message: "Fichier non trouvé ou non autorisé",
       });
       return;
@@ -158,17 +158,9 @@ export const deleteFile = async (req: Request, res: Response) => {
     // Récupérer l'URL du fichier
     const fileUrl = file.file_url;
 
-    // Supprimer le fichier du stockage Supabase
-    const { error: deleteStorageError } = await supabase.storage
-      .from("files") // Assurez-vous d'utiliser le bon nom du bucket
-      .remove([fileUrl]); // Supprimer le fichier par son chemin
-
-    if (deleteStorageError) {
-       res.status(500).json({
-        message: "Erreur lors de la suppression du fichier du stockage",
-      });
-      return;
-    }
+    // Supprimer le fichier du stockage firebase
+    const fileRef = ref(storage, fileUrl); // Utilisez l'URL ou une référence spécifique au fichier
+    await deleteObject(fileRef);
 
     // Supprimer le fichier de la base de données
     const { error: deleteDbError } = await supabase
@@ -178,7 +170,7 @@ export const deleteFile = async (req: Request, res: Response) => {
       .eq("user_id", userId);
 
     if (deleteDbError) {
-       res.status(500).json({
+      res.status(500).json({
         message:
           "Erreur lors de la suppression du fichier de la base de données",
       });
