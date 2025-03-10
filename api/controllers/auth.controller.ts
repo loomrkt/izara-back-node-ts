@@ -73,12 +73,12 @@
               ])
               .select()
               .single();
-
             if (insertError) {
               throw insertError;
             }
             user = data;
           }
+          console.log(user);
           done(null, user);
         } catch (err) {
           console.error(
@@ -193,12 +193,12 @@
         maxAge: 7 * 24 * 60 * 60 * 1000,
       });
 
-       res.status(201).json({ message: "Logged in successfully" });
-       return;
+      res.status(201).json({ message: "Logged in successfully" });
+      return;
     } catch (error) {
       console.error("Login error:", error);
-       res.status(500).json({ error: "Internal server error" });
-       return;
+      res.status(500).json({ error: "Internal server error" });
+      return;
     }
   };
 
@@ -206,38 +206,38 @@
     try {
       const { email, password } = req.body;
       console.log(req.body);
-    
+
       // Validation de l'email et du mot de passe
       if (!email || !password) {
-         res.status(401).json({ message: "Invalid email or password" });
-         return;
+        res.status(401).json({ message: "Invalid email or password" });
+        return;
       }
-    
+
       // Vérification de la validité de l'email avec une regex
       const emailRegex = /\S+@\S+\.\S+/;
       if (!emailRegex.test(email)) {
-         res.status(401).json({ message: "Invalid email or password" });
-         return;
+        res.status(401).json({ message: "Invalid email or password" });
+        return;
       }
-    
+
       // Vérification si l'utilisateur existe déjà
       const { data: existingUsers, error: selectError } = await supabase
         .from("users")
         .select("*")
         .eq("email", email);
-    
+
       if (selectError) {
         throw selectError;
       }
-    
+
       if (existingUsers.length > 0) {
-         res.status(400).json({ message: "User already exists" });
-         return;
+        res.status(400).json({ message: "User already exists" });
+        return;
       }
-    
+
       // Hachage du mot de passe
       const hashedPassword = await bcrypt.hash(password, 10);
-    
+
       // Insertion de l'utilisateur dans la base de données
       const { data, error: insertError } = await supabase
         .from("users")
@@ -249,17 +249,17 @@
         ])
         .select()
         .single();
-    
+
       if (insertError) {
         throw insertError;
       }
-    
-       res.status(201).json(data);
-       return;
+
+      res.status(201).json(data);
+      return;
     } catch (error) {
       console.error(error);
-       res.status(500).json({ message: "Registration failed" });
-       return;
+      res.status(500).json({ message: "Registration failed" });
+      return;
     }
   };
 
@@ -324,19 +324,22 @@
 
   export const logout = async (req: Request, res: Response) => {
     try {
-      res.clearCookie("accessToken", {
+      res.cookie("accessToken", "", {
         httpOnly: true,
         secure: process.env.NODE_ENV === "production",
         sameSite: "none",
-        path: "/",
+        expires: new Date(0),
       });
 
-      res.clearCookie("refreshToken", {
+      res.cookie("refreshToken", "", {
         httpOnly: true,
         secure: process.env.NODE_ENV === "production",
         sameSite: "none",
-        path: "/",
+        expires: new Date(0),
       });
+
+      res.clearCookie("accessToken");
+      res.clearCookie("refreshToken");
 
       res.json({ message: "Logged out successfully" });
     } catch (error) {
