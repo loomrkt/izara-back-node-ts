@@ -1,8 +1,7 @@
 import express from 'express';
 import dotenv from 'dotenv';
-import client from './utils/database';
-import morgan from 'morgan';
-import bodyParser from 'body-parser';
+import morgan from "morgan";
+import bodyParser from "body-parser";
 import cookieParser from "cookie-parser";
 import cors from "cors";
 import AuthRoute from "./api/routes/auth.routes";
@@ -23,17 +22,12 @@ app.use(
 app.use(cookieParser());
 app.use(express.json());
 
-client
-  .connect()
-  .then(() => console.log("Connected to postgres database ☁"))
-  .catch((err) => console.error("Connection error ⛈", err.stack));
-
 app.use(morgan("dev"));
 app.use(bodyParser.urlencoded({ extended: false }));
 app.use(bodyParser.json());
 
-app.get("/", (req, res) => {
-  res.send("Hello World!");
+app.get("/", async (req, res) => {
+  res.json({ message: "Hello World" });
 });
 
 app.use("/auth", AuthRoute);

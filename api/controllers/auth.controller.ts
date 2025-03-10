@@ -1,7 +1,7 @@
   import { Request, Response } from "express";
   import bcrypt from "bcryptjs";
   import jwt from "jsonwebtoken";
-  import client from "../../utils/database";
+  import { supabase } from "../../utils/database";
   import { User } from "../models/user.model";
   import passport from "passport";
   import { Strategy as GoogleStrategy } from "passport-google-oauth20";
@@ -49,22 +49,50 @@
       },
       async (accessToken, refreshToken, profile, done) => {
         try {
-          const { rows: newUser } = await client.query(
-            "SELECT * FROM users WHERE email = $1 OR google_id = $2",
-            [profile.emails?.[0].value, profile.id]
-          );
-          let user = newUser[0];
+          // Vérifier si l'utilisateur existe déjà
+          let { data: newUser, error } = await supabase
+            .from("users")
+            .select("*")
+            .or(
+              `email.eq.${profile.emails?.[0].value},google_id.eq.${profile.id}`
+            )
+            .single();
 
-          if (!user) {
-            const { rows: newUser } = await client.query(
-              "INSERT INTO users (email,google_id,password) VALUES ($1, $2, $3) RETURNING *",
-              [profile.emails?.[0].value, profile.id, generateStrongPassword()]
-            );
-            user = newUser[0];
+          if (error && error.code !== "PGRST116") {
+            // Ignorer l'erreur "no rows returned"
+            throw error;
           }
+
+          let user = newUser;
+
+          // Si l'utilisateur n'existe pas, l'insérer
+          if (!user) {
+            const { data, error: insertError } = await supabase
+              .from("users")
+              .insert([
+                {
+                  email: profile.emails?.[0].value,
+                  google_id: profile.id,
+                  password: generateStrongPassword(),
+                },
+              ])
+              .select()
+              .single();
+
+            if (insertError) {
+              throw insertError;
+            }
+
+            user = data;
+          }
+
           done(null, user);
-        } catch (error) {
-          done(error, false);
+        } catch (err) {
+          console.error(
+            "Erreur lors de la récupération ou de l'insertion de l'utilisateur :",
+            err
+          );
+          done(err, false);
         }
       }
     )
@@ -123,17 +151,20 @@
       }
 
       // Récupérer l'utilisateur depuis la base de données
-      const { rows } = await client.query(
-        "SELECT * FROM users WHERE email = $1",
-        [email]
-      );
+      const { data: user, error } = await supabase
+        .from("users")
+        .select("*")
+        .eq("email", email)
+        .single();
 
-      if (rows.length === 0) {
-        res.status(401).json({ error: "User  not found" });
+      if (error && error.code === "PGRST116") {
+        res.status(401).json({ error: "User not found" });
         return;
       }
 
-      const user = rows[0];
+      if (error) {
+        throw error;
+      }
 
       // Comparer le mot de passe fourni avec le mot de passe haché
       const isMatch = await bcrypt.compare(password, user.password);
@@ -146,16 +177,16 @@
       // Générer les jetons JWT
       const accessToken = jwt.sign(
         { id: user.id, type: "access" },
-        process.env.JWT_SECRET as string,
+        process.env.JWT_SECRET!,
         { expiresIn: ACCESS_TOKEN_EXPIRES_IN }
       );
       const refreshToken = jwt.sign(
         { id: user.id, type: "refresh" },
-        process.env.JWT_SECRET as string,
+        process.env.JWT_SECRET!,
         { expiresIn: REFRESH_TOKEN_EXPIRES_IN }
       );
 
-      // Définir le cookie et envoyer la réponse
+      // Définir les cookies et envoyer la réponse
       res.cookie("accessToken", accessToken, {
         httpOnly: true,
         secure: process.env.NODE_ENV === "production",
@@ -169,12 +200,12 @@
         maxAge: 7 * 24 * 60 * 60 * 1000,
       });
 
-      res.status(201).json({ message: "Logged in successfully" });
-      return;
+       res.status(201).json({ message: "Logged in successfully" });
+       return;
     } catch (error) {
       console.error("Login error:", error);
-      res.status(500).json({ error: "Internal server error" });
-      return;
+       res.status(500).json({ error: "Internal server error" });
+       return;
     }
   };
 
@@ -182,37 +213,60 @@
     try {
       const { email, password } = req.body;
       console.log(req.body);
-      //validate email and password
+    
+      // Validation de l'email et du mot de passe
       if (!email || !password) {
-        res.status(401).json({ message: "Invalid email or password" });
-        return;
+         res.status(401).json({ message: "Invalid email or password" });
+         return;
       }
-      //check if email is valid use regex
+    
+      // Vérification de la validité de l'email avec une regex
       const emailRegex = /\S+@\S+\.\S+/;
       if (!emailRegex.test(email)) {
-        res.status(401).json({ message: "Invalid email or password" });
-        return;
+         res.status(401).json({ message: "Invalid email or password" });
+         return;
       }
-      //check if user already exists
-      const { rows: existingUsers } = await client.query(
-        "SELECT * FROM users WHERE email = $1",
-        [email]
-      );
+    
+      // Vérification si l'utilisateur existe déjà
+      const { data: existingUsers, error: selectError } = await supabase
+        .from("users")
+        .select("*")
+        .eq("email", email);
+    
+      if (selectError) {
+        throw selectError;
+      }
+    
       if (existingUsers.length > 0) {
-        res.status(400).json({ message: "User already exists" });
-        return;
+         res.status(400).json({ message: "User already exists" });
+         return;
       }
+    
+      // Hachage du mot de passe
       const hashedPassword = await bcrypt.hash(password, 10);
-
-      const { rows } = await client.query(
-        "INSERT INTO users (email, password) VALUES ($1, $2) RETURNING *",
-        [email, hashedPassword]
-      );
-
-      res.status(201).json(rows[0]);
+    
+      // Insertion de l'utilisateur dans la base de données
+      const { data, error: insertError } = await supabase
+        .from("users")
+        .insert([
+          {
+            email,
+            password: hashedPassword,
+          },
+        ])
+        .select()
+        .single();
+    
+      if (insertError) {
+        throw insertError;
+      }
+    
+       res.status(201).json(data);
+       return;
     } catch (error) {
       console.error(error);
-      res.status(500).json({ message: "Registration failed" });
+       res.status(500).json({ message: "Registration failed" });
+       return;
     }
   };
 

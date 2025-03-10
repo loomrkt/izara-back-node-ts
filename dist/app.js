@@ -1,4 +1,13 @@
 "use strict";
+var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
+    function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
+    return new (P || (P = Promise))(function (resolve, reject) {
+        function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
+        function rejected(value) { try { step(generator["throw"](value)); } catch (e) { reject(e); } }
+        function step(result) { result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected); }
+        step((generator = generator.apply(thisArg, _arguments || [])).next());
+    });
+};
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
@@ -23,16 +32,20 @@ app.use((0, cors_1.default)({
 }));
 app.use((0, cookie_parser_1.default)());
 app.use(express_1.default.json());
-database_1.default
-    .connect()
-    .then(() => console.log("Connected to postgres database ☁"))
-    .catch((err) => console.error("Connection error ⛈", err.stack));
 app.use((0, morgan_1.default)("dev"));
 app.use(body_parser_1.default.urlencoded({ extended: false }));
 app.use(body_parser_1.default.json());
-app.get("/", (req, res) => {
-    res.send("Hello World!");
-});
+app.get("/", (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    console.log(database_1.default.connect());
+    const client = yield database_1.default.connect();
+    try {
+        const result = yield client.query("SELECT version()");
+        console.log(result.rows[0]);
+    }
+    finally {
+        client.release();
+    }
+}));
 app.use("/auth", auth_routes_1.default);
 app.use("/user", user_routes_1.default);
 app.use("/files", files_routes_1.default);

@@ -1,8 +1,14 @@
 import { Request, Response } from "express";
-import client from "../../utils/database";
-import {firebaseConfig} from "../../utils/firebase";
+import { supabase } from "../../utils/database";
+import { firebaseConfig } from "../../utils/firebase";
 import { initializeApp } from "firebase/app";
-import { getStorage, ref, getDownloadURL, uploadBytesResumable , deleteObject } from "firebase/storage";
+import {
+  getStorage,
+  ref,
+  getDownloadURL,
+  uploadBytesResumable,
+  deleteObject,
+} from "firebase/storage";
 import archiver from "archiver";
 import { PassThrough } from "stream";
 import * as crypto from "crypto";
@@ -17,14 +23,23 @@ const storage = getStorage();
 // Get files for current user
 export const getFiles = async (req: Request, res: Response) => {
   try {
-    const { rows } = await client.query(
-      "SELECT * FROM files WHERE user_id = $1",
-      [(req.user as User).id]
-    );
-    res.status(200).json(rows);
+    // Récupérer les fichiers de l'utilisateur
+    const { data: files, error } = await supabase
+      .from("files")
+      .select("*")
+      .eq("user_id", (req.user as User).id);
+
+    if (error) {
+      throw error;
+    }
+
+    // Renvoyer les fichiers
+     res.status(200).json(files);
+     return;
   } catch (error) {
     console.error(error);
-    res.status(500).json({ message: "Internal server error" });
+     res.status(500).json({ message: "Internal server error" });
+     return;
   }
 };
 
@@ -73,28 +88,43 @@ export const createFile = async (req: Request, res: Response) => {
 
       const shortId = generateShortId();
 
-      const { rows } = await client.query(
-        `INSERT INTO files 
-              (titre, file_url, expiration_date, user_id, taille, short_id) 
-              VALUES ($1, $2, NOW() + INTERVAL '7 days', $3, $4, $5)
-              RETURNING *`,
-        [titre, downloadURL, userId, taille, shortId]
-      );
-      console.log(downloadURL);
+      // Insérer les métadonnées du fichier dans la base de données
+      const { data: rows, error: insertError } = await supabase
+        .from("files")
+        .insert([
+          {
+            titre,
+            file_url: downloadURL,
+            expiration_date: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days from now
+            user_id: userId,
+            taille: taille,
+            short_id: shortId,
+          },
+        ])
+        .select();
+
+      if (insertError) {
+        throw insertError;
+      }
+
+      // Générer l'URL courte et insérer dans la table URL
       const url = `${
         process.env.FRONTEND_URL
       }/download?shortId=${encodeURIComponent(
-        rows[0].shortId
+        rows[0].short_id
       )}&titre=${encodeURIComponent(rows[0].titre)}&taille=${encodeURIComponent(
         rows[0].taille
       )}&expiration_date=${encodeURIComponent(
         rows[0].expiration_date
       )}&file_url=${encodeURIComponent(rows[0].file_url)}`;
-      console.log(url);
-      await client.query(
-        "INSERT INTO url (short_id, original_url) VALUES ($1, $2)",
-        [shortId, url]
-      );
+
+      const { error: urlInsertError } = await supabase
+        .from("url")
+        .insert([{ short_id: shortId, original_url: url }]);
+
+      if (urlInsertError) {
+        throw urlInsertError;
+      }
 
       res.status(201).json(rows[0]);
     });
@@ -111,32 +141,49 @@ export const deleteFile = async (req: Request, res: Response) => {
     const userId = (req.user as User).id;
 
     // Vérifier l'appartenance avant suppression
-    const { rows } = await client.query(
-      "SELECT * FROM files WHERE id = $1 AND user_id = $2",
-      [id, userId]
-    );
+    const { data: file, error: selectError } = await supabase
+      .from("files")
+      .select("*")
+      .eq("id", id)
+      .eq("user_id", userId)
+      .single(); // Récupère un seul fichier
 
-    if (rows.length === 0) {
-      res.status(404).json({
+    if (selectError || !file) {
+       res.status(404).json({
         message: "Fichier non trouvé ou non autorisé",
       });
       return;
     }
 
-    // Récupérer le nom du fichier ou l'URL dans la base de données
-    const fileUrl = rows[0].file_url;
+    // Récupérer l'URL du fichier
+    const fileUrl = file.file_url;
 
-    // Récupérer la référence du fichier dans Firebase Storage
-    const fileRef = ref(storage, fileUrl); // Utilisez l'URL ou une référence spécifique au fichier
+    // Supprimer le fichier du stockage Supabase
+    const { error: deleteStorageError } = await supabase.storage
+      .from("files") // Assurez-vous d'utiliser le bon nom du bucket
+      .remove([fileUrl]); // Supprimer le fichier par son chemin
 
-    // Supprimer le fichier de Firebase Storage
-    await deleteObject(fileRef);
+    if (deleteStorageError) {
+       res.status(500).json({
+        message: "Erreur lors de la suppression du fichier du stockage",
+      });
+      return;
+    }
 
     // Supprimer le fichier de la base de données
-    await client.query("DELETE FROM files WHERE id = $1 AND user_id = $2", [
-      id,
-      userId,
-    ]);
+    const { error: deleteDbError } = await supabase
+      .from("files")
+      .delete()
+      .eq("id", id)
+      .eq("user_id", userId);
+
+    if (deleteDbError) {
+       res.status(500).json({
+        message:
+          "Erreur lors de la suppression du fichier de la base de données",
+      });
+      return;
+    }
 
     res.status(200).json({
       message: "Fichier supprimé avec succès",
@@ -151,31 +198,54 @@ export const deleteFile = async (req: Request, res: Response) => {
 const deleteExpiredFiles = async () => {
   try {
     // Rechercher les fichiers expirés
-    const { rows } = await client.query(
-      "SELECT * FROM files WHERE expiration_date < NOW()"
-    );
+    const { data: files, error: selectError } = await supabase
+      .from("files")
+      .select("*")
+      .lt("expiration_date", new Date()); // Sélectionner les fichiers dont la date d'expiration est passée
 
-    if (rows.length > 0) {
-      for (const file of rows) {
-        // Supprimer le fichier de Cloudinary
+    if (selectError) {
+      console.error(selectError);
+      return;
+    }
 
-        // Récupérer le nom du fichier ou l'URL dans la base de données
+    if (files.length > 0) {
+      for (const file of files) {
+        // Récupérer l'URL du fichier
         const fileUrl = file.file_url;
 
-        // Récupérer la référence du fichier dans Firebase Storage
-        const fileRef = ref(storage, fileUrl); // Utilisez l'URL ou une référence spécifique au fichier
+        // Supprimer le fichier du stockage Supabase
+        const { error: deleteStorageError } = await supabase.storage
+          .from("files") // Assurez-vous d'utiliser le bon nom du bucket
+          .remove([fileUrl]);
 
-        // Supprimer le fichier de Firebase Storage
-        await deleteObject(fileRef);
+        if (deleteStorageError) {
+          console.error(
+            `Erreur lors de la suppression du fichier ${file.titre} du stockage :`,
+            deleteStorageError
+          );
+          continue; // Passer au fichier suivant en cas d'erreur
+        }
+
         // Supprimer le fichier de la base de données
-        await client.query("DELETE FROM files WHERE id = $1", [file.id]);
+        const { error: deleteDbError } = await supabase
+          .from("files")
+          .delete()
+          .eq("id", file.id);
+
+        if (deleteDbError) {
+          console.error(
+            `Erreur lors de la suppression du fichier ${file.titre} de la base de données :`,
+            deleteDbError
+          );
+          continue; // Passer au fichier suivant en cas d'erreur
+        }
 
         console.log(`Fichier supprimé : ${file.titre}`);
       }
     }
   } catch (error) {
     console.error(
-      "Erreur lors de la suppression des fichiers expirés : ",
+      "Erreur lors de la suppression des fichiers expirés :",
       error
     );
   }
@@ -214,25 +284,29 @@ const isValidUrl = (url: string): boolean => {
 export const unshorteen = async (req: Request, res: Response) => {
   try {
     const { hash } = req.params;
-
+  
     if (!hash) {
-      res.status(400).json({ message: "URL invalide" });
-      return;
+       res.status(400).json({ message: "URL invalide" });
+       return;
     }
-
-    const { rows } = await client.query(
-      "SELECT * FROM url WHERE short_id = $1",
-      [hash]
-    );
-
-    if (rows.length === 0) {
-      res.status(404).json({ message: "URL non trouvée" });
-      return;
+  
+    // Rechercher l'URL dans la base de données
+    const { data: urlData, error: selectError } = await supabase
+      .from("url")
+      .select("*")
+      .eq("short_id", hash)
+      .single();  // Récupère un seul enregistrement
+  
+    if (selectError || !urlData) {
+       res.status(404).json({ message: "URL non trouvée" });
+       return;
     }
-
-    res.redirect(rows[0].original_url);
+  
+    // Rediriger vers l'URL originale
+    res.redirect(urlData.original_url);
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: "Internal server error" });
   }
+  
 };
