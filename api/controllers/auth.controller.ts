@@ -58,11 +58,6 @@
             )
             .single();
 
-          if (error && error.code !== "PGRST116") {
-            // Ignorer l'erreur "no rows returned"
-            throw error;
-          }
-
           let user = newUser;
 
           // Si l'utilisateur n'existe pas, l'insérer
@@ -82,10 +77,8 @@
             if (insertError) {
               throw insertError;
             }
-
             user = data;
           }
-
           done(null, user);
         } catch (err) {
           console.error(
