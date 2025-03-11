@@ -50,42 +50,34 @@ export const createFile = async (req: Request, res: Response) => {
     const userId = (req.user as User).id;
 
     if (!req.file) {
-      res.status(400).json({ error: "Aucun fichier fourni." });
-      return;
+      return res.status(400).json({ error: "Aucun fichier fourni." });
     }
 
     const dateTime = giveCurrentDateTime();
+    const storageRef = ref(storage, `files/${titre + dateTime}.zip`);
 
-    // Créer un flux pour l'archive
-    const pass = new PassThrough();
+    // Création du flux de compression
     const archive = archiver("zip", { zlib: { level: 9 } });
+    const pass = new PassThrough();
 
-    // Lorsque l'archive est terminée, fermez le flux
-    archive.on("end", () => {
-      console.log("Archive complète");
-    });
-
-    // Pipe l'archive vers le flux
     archive.pipe(pass);
     archive.append(req.file.buffer, { name: req.file.originalname });
     archive.finalize();
 
-    const storageRef = ref(storage, `files/${titre + dateTime}.zip`);
-
-    // Créer les métadonnées du fichier
-    const metadata = {
-      contentType: "application/zip", // Changez le type de contenu si vous utilisez .rar
-    };
-
-    // Télécharger le fichier dans le stockage
+    // Lire les données du stream en buffer
     const chunks: Buffer[] = [];
     pass.on("data", (chunk) => chunks.push(chunk));
+
     pass.on("end", async () => {
       const buffer = Buffer.concat(chunks);
-      const snapshot = await uploadBytesResumable(storageRef, buffer, metadata);
+
+      // Upload du buffer
+      const snapshot = await uploadBytesResumable(storageRef, buffer, {
+        contentType: "application/zip",
+      });
+
       const downloadURL = await getDownloadURL(snapshot.ref);
       const taille = snapshot.bytesTransferred;
-
       const shortId = generateShortId();
 
       // Insérer les métadonnées du fichier dans la base de données
@@ -95,44 +87,33 @@ export const createFile = async (req: Request, res: Response) => {
           {
             titre,
             file_url: downloadURL,
-            expiration_date: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days from now
+            expiration_date: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
             user_id: userId,
-            taille: taille,
+            taille,
             short_id: shortId,
           },
         ])
         .select();
 
-      if (insertError) {
-        throw insertError;
-      }
+      if (insertError) throw insertError;
 
-      // Générer l'URL courte et insérer dans la table URL
+      // Générer l'URL courte
       const url = `${
         process.env.FRONTEND_URL
-      }/download?shortId=${encodeURIComponent(
-        rows[0].short_id
-      )}&titre=${encodeURIComponent(rows[0].titre)}&taille=${encodeURIComponent(
-        rows[0].taille
-      )}&expiration_date=${encodeURIComponent(
-        rows[0].expiration_date
-      )}&file_url=${encodeURIComponent(rows[0].file_url)}`;
+      }/download?shortId=${encodeURIComponent(rows[0].short_id)}`;
 
-      const { error: urlInsertError } = await supabase
+      await supabase
         .from("url")
         .insert([{ short_id: shortId, original_url: url }]);
-
-      if (urlInsertError) {
-        throw urlInsertError;
-      }
 
       res.status(201).json(rows[0]);
     });
   } catch (error) {
-    console.log(`Erreur lors de la création du fichier : ${error}`);
+    console.error(`Erreur lors de la création du fichier : ${error}`);
     res.status(500).json({ message: "Internal server error" });
   }
 };
+
 
 // Delete file with ownership check
 export const deleteFile = async (req: Request, res: Response) => {
