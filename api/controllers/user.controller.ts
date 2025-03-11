@@ -20,7 +20,8 @@ export const getUserProfile = async (req: Request, res: Response) => {
       .single(); // Récupère un seul enregistrement
 
     if (error || !user) {
-      return res.status(404).json({ message: "User not found" });
+       res.status(404).json({ message: "User not found" });
+       return;
     }
 
     res.status(200).json(user); // Retourner le profil de l'utilisateur

@@ -46,7 +46,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.unshorteen = exports.deleteFile = exports.createFile = exports.getFiles = void 0;
-const database_1 = __importDefault(require("../../utils/database"));
+const database_1 = require("../../utils/database");
 const firebase_1 = require("../../utils/firebase");
 const app_1 = require("firebase/app");
 const storage_1 = require("firebase/storage");
@@ -58,12 +58,22 @@ const storage = (0, storage_1.getStorage)();
 // Get files for current user
 const getFiles = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
-        const { rows } = yield database_1.default.query("SELECT * FROM files WHERE user_id = $1", [req.user.id]);
-        res.status(200).json(rows);
+        // Récupérer les fichiers de l'utilisateur
+        const { data: files, error } = yield database_1.supabase
+            .from("files")
+            .select("*")
+            .eq("user_id", req.user.id);
+        if (error) {
+            throw error;
+        }
+        // Renvoyer les fichiers
+        res.status(200).json(files);
+        return;
     }
     catch (error) {
         console.error(error);
         res.status(500).json({ message: "Internal server error" });
+        return;
     }
 });
 exports.getFiles = getFiles;
@@ -102,14 +112,31 @@ const createFile = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
             const downloadURL = yield (0, storage_1.getDownloadURL)(snapshot.ref);
             const taille = snapshot.bytesTransferred;
             const shortId = generateShortId();
-            const { rows } = yield database_1.default.query(`INSERT INTO files 
-              (titre, file_url, expiration_date, user_id, taille, short_id) 
-              VALUES ($1, $2, NOW() + INTERVAL '7 days', $3, $4, $5)
-              RETURNING *`, [titre, downloadURL, userId, taille, shortId]);
-            console.log(downloadURL);
-            const url = `${process.env.FRONTEND_URL}/download?shortId=${encodeURIComponent(rows[0].shortId)}&titre=${encodeURIComponent(rows[0].titre)}&taille=${encodeURIComponent(rows[0].taille)}&expiration_date=${encodeURIComponent(rows[0].expiration_date)}&file_url=${encodeURIComponent(rows[0].file_url)}`;
-            console.log(url);
-            yield database_1.default.query("INSERT INTO url (short_id, original_url) VALUES ($1, $2)", [shortId, url]);
+            // Insérer les métadonnées du fichier dans la base de données
+            const { data: rows, error: insertError } = yield database_1.supabase
+                .from("files")
+                .insert([
+                {
+                    titre,
+                    file_url: downloadURL,
+                    expiration_date: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days from now
+                    user_id: userId,
+                    taille: taille,
+                    short_id: shortId,
+                },
+            ])
+                .select();
+            if (insertError) {
+                throw insertError;
+            }
+            // Générer l'URL courte et insérer dans la table URL
+            const url = `${process.env.FRONTEND_URL}/download?shortId=${encodeURIComponent(rows[0].short_id)}&titre=${encodeURIComponent(rows[0].titre)}&taille=${encodeURIComponent(rows[0].taille)}&expiration_date=${encodeURIComponent(rows[0].expiration_date)}&file_url=${encodeURIComponent(rows[0].file_url)}`;
+            const { error: urlInsertError } = yield database_1.supabase
+                .from("url")
+                .insert([{ short_id: shortId, original_url: url }]);
+            if (urlInsertError) {
+                throw urlInsertError;
+            }
             res.status(201).json(rows[0]);
         }));
     }
@@ -125,24 +152,35 @@ const deleteFile = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
         const { id } = req.params;
         const userId = req.user.id;
         // Vérifier l'appartenance avant suppression
-        const { rows } = yield database_1.default.query("SELECT * FROM files WHERE id = $1 AND user_id = $2", [id, userId]);
-        if (rows.length === 0) {
+        const { data: file, error: selectError } = yield database_1.supabase
+            .from("files")
+            .select("*")
+            .eq("id", id)
+            .eq("user_id", userId)
+            .single(); // Récupère un seul fichier
+        if (selectError || !file) {
             res.status(404).json({
                 message: "Fichier non trouvé ou non autorisé",
             });
             return;
         }
-        // Récupérer le nom du fichier ou l'URL dans la base de données
-        const fileUrl = rows[0].file_url;
-        // Récupérer la référence du fichier dans Firebase Storage
+        // Récupérer l'URL du fichier
+        const fileUrl = file.file_url;
+        // Supprimer le fichier du stockage firebase
         const fileRef = (0, storage_1.ref)(storage, fileUrl); // Utilisez l'URL ou une référence spécifique au fichier
-        // Supprimer le fichier de Firebase Storage
         yield (0, storage_1.deleteObject)(fileRef);
         // Supprimer le fichier de la base de données
-        yield database_1.default.query("DELETE FROM files WHERE id = $1 AND user_id = $2", [
-            id,
-            userId,
-        ]);
+        const { error: deleteDbError } = yield database_1.supabase
+            .from("files")
+            .delete()
+            .eq("id", id)
+            .eq("user_id", userId);
+        if (deleteDbError) {
+            res.status(500).json({
+                message: "Erreur lors de la suppression du fichier de la base de données",
+            });
+            return;
+        }
         res.status(200).json({
             message: "Fichier supprimé avec succès",
         });
@@ -157,24 +195,41 @@ exports.deleteFile = deleteFile;
 const deleteExpiredFiles = () => __awaiter(void 0, void 0, void 0, function* () {
     try {
         // Rechercher les fichiers expirés
-        const { rows } = yield database_1.default.query("SELECT * FROM files WHERE expiration_date < NOW()");
-        if (rows.length > 0) {
-            for (const file of rows) {
-                // Supprimer le fichier de Cloudinary
-                // Récupérer le nom du fichier ou l'URL dans la base de données
+        const { data: files, error: selectError } = yield database_1.supabase
+            .from("files")
+            .select("*")
+            .lt("expiration_date", new Date()); // Sélectionner les fichiers dont la date d'expiration est passée
+        if (selectError) {
+            console.error(selectError);
+            return;
+        }
+        if (files.length > 0) {
+            for (const file of files) {
+                // Récupérer l'URL du fichier
                 const fileUrl = file.file_url;
-                // Récupérer la référence du fichier dans Firebase Storage
-                const fileRef = (0, storage_1.ref)(storage, fileUrl); // Utilisez l'URL ou une référence spécifique au fichier
-                // Supprimer le fichier de Firebase Storage
-                yield (0, storage_1.deleteObject)(fileRef);
+                // Supprimer le fichier du stockage Supabase
+                const { error: deleteStorageError } = yield database_1.supabase.storage
+                    .from("files") // Assurez-vous d'utiliser le bon nom du bucket
+                    .remove([fileUrl]);
+                if (deleteStorageError) {
+                    console.error(`Erreur lors de la suppression du fichier ${file.titre} du stockage :`, deleteStorageError);
+                    continue; // Passer au fichier suivant en cas d'erreur
+                }
                 // Supprimer le fichier de la base de données
-                yield database_1.default.query("DELETE FROM files WHERE id = $1", [file.id]);
+                const { error: deleteDbError } = yield database_1.supabase
+                    .from("files")
+                    .delete()
+                    .eq("id", file.id);
+                if (deleteDbError) {
+                    console.error(`Erreur lors de la suppression du fichier ${file.titre} de la base de données :`, deleteDbError);
+                    continue; // Passer au fichier suivant en cas d'erreur
+                }
                 console.log(`Fichier supprimé : ${file.titre}`);
             }
         }
     }
     catch (error) {
-        console.error("Erreur lors de la suppression des fichiers expirés : ", error);
+        console.error("Erreur lors de la suppression des fichiers expirés :", error);
     }
 });
 // Exécuter la tâche toutes les 24 heures
@@ -209,12 +264,18 @@ const unshorteen = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
             res.status(400).json({ message: "URL invalide" });
             return;
         }
-        const { rows } = yield database_1.default.query("SELECT * FROM url WHERE short_id = $1", [hash]);
-        if (rows.length === 0) {
+        // Rechercher l'URL dans la base de données
+        const { data: urlData, error: selectError } = yield database_1.supabase
+            .from("url")
+            .select("*")
+            .eq("short_id", hash)
+            .single(); // Récupère un seul enregistrement
+        if (selectError || !urlData) {
             res.status(404).json({ message: "URL non trouvée" });
             return;
         }
-        res.redirect(rows[0].original_url);
+        // Rediriger vers l'URL originale
+        res.redirect(urlData.original_url);
     }
     catch (error) {
         console.error(error);

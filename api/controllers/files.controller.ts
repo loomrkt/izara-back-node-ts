@@ -9,9 +9,10 @@ import {
   uploadBytesResumable,
   deleteObject,
 } from "firebase/storage";
+import archiver from "archiver";
 import { PassThrough } from "stream";
 import * as crypto from "crypto";
-import * as zlib from "zlib";
+import validUrl from "valid-url";
 
 interface User {
   id: string;
@@ -49,88 +50,88 @@ export const createFile = async (req: Request, res: Response) => {
     const userId = (req.user as User).id;
 
     if (!req.file) {
-       res.status(400).json({ error: "Aucun fichier fourni." });
-       return;
+      res.status(400).json({ error: "Aucun fichier fourni." });
+      return;
     }
 
     const dateTime = giveCurrentDateTime();
-    const storageRef = ref(storage, `files/${titre + dateTime}.gz`);
 
-    // Créer un stream pour la compression GZIP
-    const gzip = zlib.createGzip();
-    const passThrough = new PassThrough();
+    // Créer un flux pour l'archive
+    const pass = new PassThrough();
+    const archive = archiver("zip", { zlib: { level: 9 } });
 
-    // Compresser le fichier en temps réel
-    passThrough.end(req.file.buffer); // End pour déclencher la compression
-
-    // Pipe le stream gzip
-    passThrough.pipe(gzip);
-
-    // Convertir le stream en buffer
-    const buffer = await streamToBuffer(gzip);
-
-    // Upload du buffer compressé sur Firebase
-    const uploadTask = uploadBytesResumable(storageRef, buffer, {
-      contentType: "application/gzip",
+    // Lorsque l'archive est terminée, fermez le flux
+    archive.on("end", () => {
+      console.log("Archive complète");
     });
 
-    uploadTask.on(
-      "state_changed",
-      (snapshot) => {
-        console.log(`Upload progress: ${(snapshot.bytesTransferred / snapshot.totalBytes) * 100}%`);
-      },
-      (error) => {
-        console.error("Erreur lors de l'upload Firebase:", error);
-        res.status(500).json({ message: "Erreur lors de l'upload Firebase" });
-      },
-      async () => {
-        // Upload terminé
-        const downloadURL = await getDownloadURL(uploadTask.snapshot.ref);
-        const taille = uploadTask.snapshot.bytesTransferred;
-        const shortId = generateShortId();
+    // Pipe l'archive vers le flux
+    archive.pipe(pass);
+    archive.append(req.file.buffer, { name: req.file.originalname });
+    archive.finalize();
 
-        // Insérer dans la base de données
-        const { data: rows, error: insertError } = await supabase
-          .from("files")
-          .insert([
-            {
-              titre,
-              file_url: downloadURL,
-              expiration_date: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-              user_id: userId,
-              taille,
-              short_id: shortId,
-            },
-          ])
-          .select();
+    const storageRef = ref(storage, `files/${titre + dateTime}.zip`);
 
-        if (insertError) throw insertError;
+    // Créer les métadonnées du fichier
+    const metadata = {
+      contentType: "application/zip", // Changez le type de contenu si vous utilisez .rar
+    };
 
-        // Générer l'URL courte
-        const url = `${process.env.FRONTEND_URL}/download?shortId=${encodeURIComponent(rows[0].short_id)}`;
+    // Télécharger le fichier dans le stockage
+    const chunks: Buffer[] = [];
+    pass.on("data", (chunk) => chunks.push(chunk));
+    pass.on("end", async () => {
+      const buffer = Buffer.concat(chunks);
+      const snapshot = await uploadBytesResumable(storageRef, buffer, metadata);
+      const downloadURL = await getDownloadURL(snapshot.ref);
+      const taille = snapshot.bytesTransferred;
 
-        await supabase.from("url").insert([{ short_id: shortId, original_url: url }]);
+      const shortId = generateShortId();
 
-        res.status(201).json(rows[0]);
+      // Insérer les métadonnées du fichier dans la base de données
+      const { data: rows, error: insertError } = await supabase
+        .from("files")
+        .insert([
+          {
+            titre,
+            file_url: downloadURL,
+            expiration_date: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days from now
+            user_id: userId,
+            taille: taille,
+            short_id: shortId,
+          },
+        ])
+        .select();
+
+      if (insertError) {
+        throw insertError;
       }
-    );
+
+      // Générer l'URL courte et insérer dans la table URL
+      const url = `${
+        process.env.FRONTEND_URL
+      }/download?shortId=${encodeURIComponent(
+        rows[0].short_id
+      )}&titre=${encodeURIComponent(rows[0].titre)}&taille=${encodeURIComponent(
+        rows[0].taille
+      )}&expiration_date=${encodeURIComponent(
+        rows[0].expiration_date
+      )}&file_url=${encodeURIComponent(rows[0].file_url)}`;
+
+      const { error: urlInsertError } = await supabase
+        .from("url")
+        .insert([{ short_id: shortId, original_url: url }]);
+
+      if (urlInsertError) {
+        throw urlInsertError;
+      }
+
+      res.status(201).json(rows[0]);
+    });
   } catch (error) {
-    console.error(`Erreur lors de la création du fichier : ${error}`);
+    console.log(`Erreur lors de la création du fichier : ${error}`);
     res.status(500).json({ message: "Internal server error" });
   }
-};
-
-// Duplicate function removed
-
-
-// Fonction pour convertir un stream en buffer
-const streamToBuffer = (stream: NodeJS.ReadableStream): Promise<Buffer> => {
-  return new Promise((resolve, reject) => {
-    const chunks: Buffer[] = [];
-    stream.on("data", (chunk) => chunks.push(chunk));
-    stream.on("end", () => resolve(Buffer.concat(chunks)));
-    stream.on("error", reject);
-  });
 };
 
 // Delete file with ownership check

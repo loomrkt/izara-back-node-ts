@@ -48,7 +48,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.checkAuth = exports.logout = exports.refreshToken = exports.register = exports.login = exports.googleCallback = exports.loginWithGoogle = void 0;
 const bcryptjs_1 = __importDefault(require("bcryptjs"));
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
-const database_1 = __importDefault(require("../../utils/database"));
+const database_1 = require("../../utils/database");
 const passport_1 = __importDefault(require("passport"));
 const passport_google_oauth20_1 = require("passport-google-oauth20");
 const dotenv = __importStar(require("dotenv"));
@@ -85,16 +85,37 @@ passport_1.default.use(new passport_google_oauth20_1.Strategy({
 }, (accessToken, refreshToken, profile, done) => __awaiter(void 0, void 0, void 0, function* () {
     var _a, _b;
     try {
-        const { rows: newUser } = yield database_1.default.query("SELECT * FROM users WHERE email = $1 OR google_id = $2", [(_a = profile.emails) === null || _a === void 0 ? void 0 : _a[0].value, profile.id]);
-        let user = newUser[0];
+        // Vérifier si l'utilisateur existe déjà
+        let { data: newUser, error } = yield database_1.supabase
+            .from("users")
+            .select("*")
+            .or(`email.eq.${(_a = profile.emails) === null || _a === void 0 ? void 0 : _a[0].value},google_id.eq.${profile.id}`)
+            .single();
+        let user = newUser;
+        // Si l'utilisateur n'existe pas, l'insérer
         if (!user) {
-            const { rows: newUser } = yield database_1.default.query("INSERT INTO users (email,google_id,password) VALUES ($1, $2, $3) RETURNING *", [(_b = profile.emails) === null || _b === void 0 ? void 0 : _b[0].value, profile.id, generateStrongPassword()]);
-            user = newUser[0];
+            const { data, error: insertError } = yield database_1.supabase
+                .from("users")
+                .insert([
+                {
+                    email: (_b = profile.emails) === null || _b === void 0 ? void 0 : _b[0].value,
+                    google_id: profile.id,
+                    password: generateStrongPassword(),
+                },
+            ])
+                .select()
+                .single();
+            if (insertError) {
+                throw insertError;
+            }
+            user = data;
         }
+        console.log(user);
         done(null, user);
     }
-    catch (error) {
-        done(error, false);
+    catch (err) {
+        console.error("Erreur lors de la récupération ou de l'insertion de l'utilisateur :", err);
+        done(err, false);
     }
 })));
 exports.loginWithGoogle = passport_1.default.authenticate("google", {
@@ -134,12 +155,18 @@ const login = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
             return;
         }
         // Récupérer l'utilisateur depuis la base de données
-        const { rows } = yield database_1.default.query("SELECT * FROM users WHERE email = $1", [email]);
-        if (rows.length === 0) {
-            res.status(401).json({ error: "User  not found" });
+        const { data: user, error } = yield database_1.supabase
+            .from("users")
+            .select("*")
+            .eq("email", email)
+            .single();
+        if (error && error.code === "PGRST116") {
+            res.status(401).json({ error: "User not found" });
             return;
         }
-        const user = rows[0];
+        if (error) {
+            throw error;
+        }
         // Comparer le mot de passe fourni avec le mot de passe haché
         const isMatch = yield bcryptjs_1.default.compare(password, user.password);
         if (!isMatch) {
@@ -149,7 +176,7 @@ const login = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
         // Générer les jetons JWT
         const accessToken = jsonwebtoken_1.default.sign({ id: user.id, type: "access" }, process.env.JWT_SECRET, { expiresIn: ACCESS_TOKEN_EXPIRES_IN });
         const refreshToken = jsonwebtoken_1.default.sign({ id: user.id, type: "refresh" }, process.env.JWT_SECRET, { expiresIn: REFRESH_TOKEN_EXPIRES_IN });
-        // Définir le cookie et envoyer la réponse
+        // Définir les cookies et envoyer la réponse
         res.cookie("accessToken", accessToken, {
             httpOnly: true,
             secure: process.env.NODE_ENV === "production",
@@ -176,30 +203,52 @@ const register = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         const { email, password } = req.body;
         console.log(req.body);
-        //validate email and password
+        // Validation de l'email et du mot de passe
         if (!email || !password) {
             res.status(401).json({ message: "Invalid email or password" });
             return;
         }
-        //check if email is valid use regex
+        // Vérification de la validité de l'email avec une regex
         const emailRegex = /\S+@\S+\.\S+/;
         if (!emailRegex.test(email)) {
             res.status(401).json({ message: "Invalid email or password" });
             return;
         }
-        //check if user already exists
-        const { rows: existingUsers } = yield database_1.default.query("SELECT * FROM users WHERE email = $1", [email]);
+        // Vérification si l'utilisateur existe déjà
+        const { data: existingUsers, error: selectError } = yield database_1.supabase
+            .from("users")
+            .select("*")
+            .eq("email", email);
+        if (selectError) {
+            throw selectError;
+        }
         if (existingUsers.length > 0) {
             res.status(400).json({ message: "User already exists" });
             return;
         }
+        // Hachage du mot de passe
         const hashedPassword = yield bcryptjs_1.default.hash(password, 10);
-        const { rows } = yield database_1.default.query("INSERT INTO users (email, password) VALUES ($1, $2) RETURNING *", [email, hashedPassword]);
-        res.status(201).json(rows[0]);
+        // Insertion de l'utilisateur dans la base de données
+        const { data, error: insertError } = yield database_1.supabase
+            .from("users")
+            .insert([
+            {
+                email,
+                password: hashedPassword,
+            },
+        ])
+            .select()
+            .single();
+        if (insertError) {
+            throw insertError;
+        }
+        res.status(201).json(data);
+        return;
     }
     catch (error) {
         console.error(error);
         res.status(500).json({ message: "Registration failed" });
+        return;
     }
 });
 exports.register = register;
@@ -245,18 +294,23 @@ const refreshToken = (req, res) => __awaiter(void 0, void 0, void 0, function* (
 exports.refreshToken = refreshToken;
 const logout = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
-        res.clearCookie("accessToken", {
+        res.cookie("accessToken", "", {
             httpOnly: true,
             secure: process.env.NODE_ENV === "production",
             sameSite: "none",
-            path: "/",
+            expires: new Date(0),
         });
-        res.clearCookie("refreshToken", {
+        res.cookie("refreshToken", "", {
             httpOnly: true,
             secure: process.env.NODE_ENV === "production",
             sameSite: "none",
-            path: "/",
+            expires: new Date(0),
         });
+        res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+        res.setHeader("Pragma", "no-cache");
+        res.setHeader("Expires", "0");
+        res.clearCookie("accessToken");
+        res.clearCookie("refreshToken");
         res.json({ message: "Logged out successfully" });
     }
     catch (error) {

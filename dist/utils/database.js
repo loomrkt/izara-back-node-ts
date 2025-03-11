@@ -3,17 +3,10 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-const pg_1 = require("pg");
+exports.supabase = void 0;
 const dotenv_1 = __importDefault(require("dotenv"));
+const supabase_js_1 = require("@supabase/supabase-js");
 dotenv_1.default.config();
-const pool = new pg_1.Pool({
-    user: process.env.PGUSER,
-    host: process.env.PGHOST,
-    database: process.env.PGDATABASE,
-    password: process.env.PGPASSWORD,
-    port: 5432, // Vérifie si c'est bien le bon port
-    ssl: {
-        rejectUnauthorized: false,
-    },
-});
-exports.default = pool;
+const supabaseUrl = "https://crjapfnzuhvdhgvovlmb.supabase.co";
+const supabaseKey = process.env.SUPABASE_KEY;
+exports.supabase = (0, supabase_js_1.createClient)(supabaseUrl, supabaseKey);

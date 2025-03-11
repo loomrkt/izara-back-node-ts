@@ -14,7 +14,6 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = __importDefault(require("express"));
 const dotenv_1 = __importDefault(require("dotenv"));
-const database_1 = __importDefault(require("./utils/database"));
 const morgan_1 = __importDefault(require("morgan"));
 const body_parser_1 = __importDefault(require("body-parser"));
 const cookie_parser_1 = __importDefault(require("cookie-parser"));
@@ -36,15 +35,7 @@ app.use((0, morgan_1.default)("dev"));
 app.use(body_parser_1.default.urlencoded({ extended: false }));
 app.use(body_parser_1.default.json());
 app.get("/", (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    console.log(database_1.default.connect());
-    const client = yield database_1.default.connect();
-    try {
-        const result = yield client.query("SELECT version()");
-        console.log(result.rows[0]);
-    }
-    finally {
-        client.release();
-    }
+    res.json({ message: "Hello World" });
 }));
 app.use("/auth", auth_routes_1.default);
 app.use("/user", user_routes_1.default);

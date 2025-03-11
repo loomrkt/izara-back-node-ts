@@ -8,29 +8,30 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
         step((generator = generator.apply(thisArg, _arguments || [])).next());
     });
 };
-var __importDefault = (this && this.__importDefault) || function (mod) {
-    return (mod && mod.__esModule) ? mod : { "default": mod };
-};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getUserProfile = void 0;
-const database_1 = __importDefault(require("../../utils/database"));
+const database_1 = require("../../utils/database");
 const getUserProfile = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         if (!req.user) {
-            res.status(401).json({ message: 'Unauthorized' });
+            res.status(401).json({ message: "Unauthorized" });
             return;
         }
         const userId = req.user.id;
-        const { rows } = yield database_1.default.query('SELECT * FROM users WHERE id = $1', [userId]);
-        if (rows.length === 0) {
-            res.status(404).json({ message: 'User not found' });
+        const { data: user, error } = yield database_1.supabase
+            .from("users")
+            .select("*")
+            .eq("id", userId)
+            .single(); // Récupère un seul enregistrement
+        if (error || !user) {
+            res.status(404).json({ message: "User not found" });
             return;
         }
-        res.status(200).json(rows[0]); // Retourner le profil de l'utilisateur
+        res.status(200).json(user); // Retourner le profil de l'utilisateur
     }
     catch (error) {
         console.error(error);
-        res.status(500).json({ message: 'Internal server error' });
+        res.status(500).json({ message: "Internal server error" });
     }
 });
 exports.getUserProfile = getUserProfile;
