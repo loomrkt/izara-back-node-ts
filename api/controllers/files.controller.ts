@@ -9,10 +9,9 @@ import {
   uploadBytesResumable,
   deleteObject,
 } from "firebase/storage";
-import archiver from "archiver";
 import { PassThrough } from "stream";
 import * as crypto from "crypto";
-import validUrl from "valid-url";
+import * as zlib from "zlib";
 
 interface User {
   id: string;
@@ -55,32 +54,30 @@ export const createFile = async (req: Request, res: Response) => {
     }
 
     const dateTime = giveCurrentDateTime();
-    const storageRef = ref(storage, `files/${titre + dateTime}.zip`);
+    const storageRef = ref(storage, `files/${titre + dateTime}.gz`);
 
-    // Création d'un stream de compression
-    const archive = archiver("zip", { zlib: { level: 9 } });
+    // Créer un stream pour la compression GZIP
+    const gzip = zlib.createGzip();
     const passThrough = new PassThrough();
 
-    archive.pipe(passThrough);
-    archive.append(req.file.buffer, { name: req.file.originalname });
-    archive.finalize();
+    // Compresser le fichier en temps réel
+    passThrough.end(req.file.buffer); // End pour déclencher la compression
 
-    // Convertir le stream en buffer avant de l'envoyer
-    const buffer = await streamToBuffer(passThrough);
+    // Pipe le stream gzip
+    passThrough.pipe(gzip);
+
+    // Convertir le stream en buffer
+    const buffer = await streamToBuffer(gzip);
 
     // Upload du buffer compressé sur Firebase
     const uploadTask = uploadBytesResumable(storageRef, buffer, {
-      contentType: "application/zip",
+      contentType: "application/gzip",
     });
 
     uploadTask.on(
       "state_changed",
       (snapshot) => {
-        console.log(
-          `Upload progress: ${
-            (snapshot.bytesTransferred / snapshot.totalBytes) * 100
-          }%`
-        );
+        console.log(`Upload progress: ${(snapshot.bytesTransferred / snapshot.totalBytes) * 100}%`);
       },
       (error) => {
         console.error("Erreur lors de l'upload Firebase:", error);
@@ -110,13 +107,9 @@ export const createFile = async (req: Request, res: Response) => {
         if (insertError) throw insertError;
 
         // Générer l'URL courte
-        const url = `${
-          process.env.FRONTEND_URL
-        }/download?shortId=${encodeURIComponent(rows[0].short_id)}`;
+        const url = `${process.env.FRONTEND_URL}/download?shortId=${encodeURIComponent(rows[0].short_id)}`;
 
-        await supabase
-          .from("url")
-          .insert([{ short_id: shortId, original_url: url }]);
+        await supabase.from("url").insert([{ short_id: shortId, original_url: url }]);
 
         res.status(201).json(rows[0]);
       }
@@ -126,6 +119,9 @@ export const createFile = async (req: Request, res: Response) => {
     res.status(500).json({ message: "Internal server error" });
   }
 };
+
+// Duplicate function removed
+
 
 // Fonction pour convertir un stream en buffer
 const streamToBuffer = (stream: NodeJS.ReadableStream): Promise<Buffer> => {
