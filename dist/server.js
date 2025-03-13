@@ -74,10 +74,9 @@ const errorHandler = (error) => {
 // Créer le serveur HTTP
 const server = http.createServer(app_1.default);
 // Initialiser Socket.IO
-const io = new socket_io_1.Server(server, { cors: { origin: "*" } });
-exports.io = io;
+exports.io = new socket_io_1.Server(server, { cors: { origin: "*" } });
 // Gérer les événements Socket.IO
-io.on("connection", (socket) => {
+exports.io.on("connection", (socket) => {
     console.log("Un client s'est connecté :", socket.id);
     socket.on("disconnect", () => {
         console.log("Un client s'est déconnecté :", socket.id);
@@ -92,4 +91,3 @@ server.on("listening", () => {
 server.listen(port, () => {
     console.log(`Server is running on port ${port} 🎧`);
 });
-exports.default = server; // <-- Ajout de l'exportation par défaut

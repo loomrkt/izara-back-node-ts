@@ -42,7 +42,7 @@ const errorHandler = (error: NodeJS.ErrnoException) => {
 const server = http.createServer(app);
 
 // Initialiser Socket.IO
-const io = new Server(server, { cors: { origin: "*" } });
+export const io = new Server(server, { cors: { origin: "*" } });
 
 // Gérer les événements Socket.IO
 io.on("connection", (socket) => {
@@ -63,6 +63,3 @@ server.on("listening", () => {
 server.listen(port, () => {
   console.log(`Server is running on port ${port} 🎧`);
 });
-
-export default server; // <-- Ajout de l'exportation par défaut
-export { io };
