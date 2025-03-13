@@ -64,4 +64,5 @@ server.listen(port, () => {
   console.log(`Server is running on port ${port} 🎧`);
 });
 
+export default server; // <-- Ajout de l'exportation par défaut
 export { io };

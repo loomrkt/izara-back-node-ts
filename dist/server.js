@@ -92,3 +92,4 @@ server.on("listening", () => {
 server.listen(port, () => {
     console.log(`Server is running on port ${port} 🎧`);
 });
+exports.default = server; // <-- Ajout de l'exportation par défaut
