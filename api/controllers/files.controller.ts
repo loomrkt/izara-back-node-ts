@@ -12,7 +12,7 @@ import {
 import archiver from "archiver";
 import { PassThrough } from "stream";
 import * as crypto from "crypto";
-import validUrl from "valid-url";
+import { io } from "../../server";
 
 interface User {
   id: string;
@@ -34,12 +34,12 @@ export const getFiles = async (req: Request, res: Response) => {
     }
 
     // Renvoyer les fichiers
-     res.status(200).json(files);
-     return;
+    res.status(200).json(files);
+    return;
   } catch (error) {
     console.error(error);
-     res.status(500).json({ message: "Internal server error" });
-     return;
+    res.status(500).json({ message: "Internal server error" });
+    return;
   }
 };
 
@@ -54,85 +54,106 @@ export const createFile = async (req: Request, res: Response) => {
       return;
     }
 
-    const dateTime = giveCurrentDateTime();
+    // Ici, TypeScript sait que req.file n'est plus undefined
+    const { size } = req.file;
+    const socketId = req.body.socketId;
 
-    // Créer un flux pour l'archive
-    const pass = new PassThrough();
+    const dateTime = giveCurrentDateTime();
+    const passThrough = new PassThrough();
     const archive = archiver("zip", { zlib: { level: 9 } });
 
-    // Lorsque l'archive est terminée, fermez le flux
-    archive.on("end", () => {
-      console.log("Archive complète");
+    // Gestionnaire d'événements de compression
+    archive.on("warning", (error) => {
+      console.warn("Avertissement lors de la compression :", error);
     });
 
-    // Pipe l'archive vers le flux
-    archive.pipe(pass);
+    archive.on("error", (error) => {
+      console.error("Erreur lors de la compression :", error);
+      res.status(500).json({ message: "Internal server error" });
+    });
+
+    archive.on("end", async () => {
+      console.log("Compression terminée !");
+      io.to(socketId).emit("compressProgress", { progress: 100 });
+    });
+
+    archive.pipe(passThrough);
     archive.append(req.file.buffer, { name: req.file.originalname });
     archive.finalize();
 
     const storageRef = ref(storage, `files/${titre + dateTime}.zip`);
+    const metadata = { contentType: "application/zip" };
 
-    // Créer les métadonnées du fichier
-    const metadata = {
-      contentType: "application/zip", // Changez le type de contenu si vous utilisez .rar
-    };
-
-    // Télécharger le fichier dans le stockage
     const chunks: Buffer[] = [];
-    pass.on("data", (chunk) => chunks.push(chunk));
-    pass.on("end", async () => {
+    let processedsize = 0;
+    passThrough.on("data", (chunk) => {
+      processedsize += chunk.length;
+      const uploadPercent = ((processedsize / size) * 100).toFixed(2);
+      io.to(socketId).emit("compressProgress", {
+        progress: Math.floor(Number(uploadPercent)),
+      });
+      chunks.push(chunk);
+    });
+    passThrough.on("end", () => {
       const buffer = Buffer.concat(chunks);
-      const snapshot = await uploadBytesResumable(storageRef, buffer, metadata);
-      const downloadURL = await getDownloadURL(snapshot.ref);
-      const taille = snapshot.bytesTransferred;
+      const uploadTask = uploadBytesResumable(storageRef, buffer, metadata);
 
-      const shortId = generateShortId();
+      // Upload phase with 100% weight
+      let lastUploadProgress = 0; //  0% (upload)
 
-      // Insérer les métadonnées du fichier dans la base de données
-      const { data: rows, error: insertError } = await supabase
-        .from("files")
-        .insert([
-          {
-            titre,
-            file_url: downloadURL,
-            expiration_date: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days from now
-            user_id: userId,
-            taille: taille,
-            short_id: shortId,
-          },
-        ])
-        .select();
+      uploadTask.on(
+        "state_changed",
+        (snapshot) => {
+          const uploadPercent =
+            (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
+          console.log("Upload en cours :", uploadPercent);
+          const totalProgress = Math.floor(uploadPercent);
+          if (totalProgress > lastUploadProgress) {
+            for (let i = lastUploadProgress + 1; i <= totalProgress; i++) {
+              io.to(socketId).emit("uploadProgress", { progress: i });
+            }
+            lastUploadProgress = totalProgress;
+          }
+        },
+        (error) => {
+          console.error("Erreur d'upload :", error);
+        },
+        async () => {
+          const downloadURL = await getDownloadURL(uploadTask.snapshot.ref);
+          console.log("Upload terminé !");
+          io.emit("uploadCompleted");
 
-      if (insertError) {
-        throw insertError;
-      }
+          const taille = uploadTask.snapshot.bytesTransferred;
+          const shortId = generateShortId();
+          const expirationDate = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
 
-      // Générer l'URL courte et insérer dans la table URL
-      const url = `${
-        process.env.FRONTEND_URL
-      }/download?shortId=${encodeURIComponent(
-        rows[0].short_id
-      )}&titre=${encodeURIComponent(rows[0].titre)}&taille=${encodeURIComponent(
-        rows[0].taille
-      )}&expiration_date=${encodeURIComponent(
-        rows[0].expiration_date
-      )}&file_url=${encodeURIComponent(rows[0].file_url)}`;
+          const { data: rows, error: insertError } = await supabase
+            .from("files")
+            .insert([
+              {
+                titre,
+                file_url: downloadURL,
+                expiration_date: expirationDate,
+                user_id: userId,
+                taille,
+                short_id: shortId,
+              },
+            ])
+            .select();
 
-      const { error: urlInsertError } = await supabase
-        .from("url")
-        .insert([{ short_id: shortId, original_url: url }]);
+          if (insertError) throw insertError;
 
-      if (urlInsertError) {
-        throw urlInsertError;
-      }
-
-      res.status(201).json(rows[0]);
+          res.status(201).json(rows[0]);
+        }
+      );
     });
   } catch (error) {
     console.log(`Erreur lors de la création du fichier : ${error}`);
     res.status(500).json({ message: "Internal server error" });
   }
 };
+
+
 
 // Delete file with ownership check
 export const deleteFile = async (req: Request, res: Response) => {

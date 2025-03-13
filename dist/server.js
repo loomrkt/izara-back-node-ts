@@ -36,7 +36,9 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.io = void 0;
 const http = __importStar(require("http"));
+const socket_io_1 = require("socket.io");
 const app_1 = __importDefault(require("./app"));
 const normalizePort = (val) => {
     const port = parseInt(val, 10);
@@ -48,33 +50,44 @@ const normalizePort = (val) => {
     }
     return val;
 };
-const port = normalizePort(process.env.PORT || '3000');
-app_1.default.set('port', port);
+const port = normalizePort(process.env.PORT || "3000");
+app_1.default.set("port", port);
 const errorHandler = (error) => {
-    if (error.syscall !== 'listen') {
+    if (error.syscall !== "listen") {
         throw error;
     }
     const address = server.address();
-    const bind = typeof address === 'string' ? 'pipe ' + address : 'port: ' + port;
+    const bind = typeof address === "string" ? "pipe " + address : "port: " + port;
     switch (error.code) {
-        case 'EACCES':
-            console.error(bind + ' requires elevated privileges.');
+        case "EACCES":
+            console.error(bind + " requires elevated privileges.");
             process.exit(1);
             break;
-        case 'EADDRINUSE':
-            console.error(bind + ' is already in use.');
+        case "EADDRINUSE":
+            console.error(bind + " is already in use.");
             process.exit(1);
             break;
         default:
             throw error;
     }
 };
+// Créer le serveur HTTP
 const server = http.createServer(app_1.default);
-server.on('error', errorHandler);
-server.on('listening', () => {
+// Initialiser Socket.IO
+const io = new socket_io_1.Server(server, { cors: { origin: "*" } });
+exports.io = io;
+// Gérer les événements Socket.IO
+io.on("connection", (socket) => {
+    console.log("Un client s'est connecté :", socket.id);
+    socket.on("disconnect", () => {
+        console.log("Un client s'est déconnecté :", socket.id);
+    });
+});
+server.on("error", errorHandler);
+server.on("listening", () => {
     const address = server.address();
-    const bind = typeof address === 'string' ? 'pipe ' + address : 'port ' + port;
-    console.log('Listening on ' + bind);
+    const bind = typeof address === "string" ? "pipe " + address : "port " + port;
+    console.log("Listening on " + bind);
 });
 server.listen(port, () => {
     console.log(`Server is running on port ${port} 🎧`);
