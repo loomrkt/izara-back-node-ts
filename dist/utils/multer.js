@@ -57,12 +57,7 @@ exports.upload = (0, multer_1.default)({
 // Middleware de gestion d'erreurs typé
 const handleUploadErrors = (err, req, res, next) => {
     if (err instanceof multer_1.MulterError) {
-        res.status(400).json({
-            success: false,
-            error: err.code === "LIMIT_FILE_SIZE"
-                ? "Le fichier dépasse la taille maximale autorisée (500MB)"
-                : "Erreur lors du téléchargement du fichier",
-        });
+        res.status(400).json({ success: false, error: "Message..." });
         return;
     }
     if (err instanceof Error) {

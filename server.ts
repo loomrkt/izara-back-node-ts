@@ -1,5 +1,4 @@
-import * as http from 'http';
-import { Server } from "socket.io";
+import * as http from "http";
 import app from "./app";
 
 const normalizePort = (val: string): number | string => {
@@ -40,18 +39,6 @@ const errorHandler = (error: NodeJS.ErrnoException) => {
 
 // Créer le serveur HTTP
 const server = http.createServer(app);
-
-// Initialiser Socket.IO
-export const io = new Server(server, { cors: { origin: "*" } });
-
-// Gérer les événements Socket.IO
-io.on("connection", (socket) => {
-  console.log("Un client s'est connecté :", socket.id);
-
-  socket.on("disconnect", () => {
-    console.log("Un client s'est déconnecté :", socket.id);
-  });
-});
 
 server.on("error", errorHandler);
 server.on("listening", () => {
