@@ -47,10 +47,6 @@ app.get("/sse/:clientId", (req, res) => {
     Connection: "keep-alive",
     "Cache-Control": "no-cache",
     "Access-Control-Allow-Origin": process.env.FRONTEND_URL || "*",
-    "Access-Control-Allow-Credentials": "true",
-    "Vercel-CDN-Cache-Control": "no-cache",
-    "Vercel-Cache-Tag": "sse",
-    "X-Accel-Buffering": "no",
   });
 
   const newClient = {
