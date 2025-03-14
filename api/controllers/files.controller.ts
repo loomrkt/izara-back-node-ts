@@ -54,7 +54,6 @@ export const createFile = async (req: Request, res: Response) => {
       return;
     }
 
-    // Ici, TypeScript sait que req.file n'est plus undefined
     const { size } = req.file;
     const socketId = req.body.socketId;
 
@@ -127,6 +126,7 @@ export const createFile = async (req: Request, res: Response) => {
           const shortId = generateShortId();
           const expirationDate = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
 
+          // Insérer les métadonnées du fichier dans la base de données
           const { data: rows, error: insertError } = await supabase
             .from("files")
             .insert([
@@ -135,13 +135,36 @@ export const createFile = async (req: Request, res: Response) => {
                 file_url: downloadURL,
                 expiration_date: expirationDate,
                 user_id: userId,
-                taille,
+                taille: taille,
                 short_id: shortId,
               },
             ])
             .select();
 
-          if (insertError) throw insertError;
+          if (insertError) {
+            throw insertError;
+          }
+
+          // Générer l'URL courte et insérer dans la table URL
+          const url = `${
+            process.env.FRONTEND_URL
+          }/download?shortId=${encodeURIComponent(
+            rows[0].short_id
+          )}&titre=${encodeURIComponent(
+            rows[0].titre
+          )}&taille=${encodeURIComponent(
+            rows[0].taille
+          )}&expiration_date=${encodeURIComponent(
+            rows[0].expiration_date
+          )}&file_url=${encodeURIComponent(rows[0].file_url)}`;
+
+          const { error: urlInsertError } = await supabase
+            .from("url")
+            .insert([{ short_id: shortId, original_url: url }]);
+
+          if (urlInsertError) {
+            throw urlInsertError;
+          }
 
           res.status(201).json(rows[0]);
         }
