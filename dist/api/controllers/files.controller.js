@@ -53,7 +53,7 @@ const storage_1 = require("firebase/storage");
 const archiver_1 = __importDefault(require("archiver"));
 const stream_1 = require("stream");
 const crypto = __importStar(require("crypto"));
-const app_2 = require("../../app");
+const server_1 = require("../../server");
 (0, app_1.initializeApp)(firebase_1.firebaseConfig);
 const storage = (0, storage_1.getStorage)();
 // Get files for current user
@@ -81,7 +81,7 @@ exports.getFiles = getFiles;
 // Create file with user association
 const createFile = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
-        const { titre, clientId } = req.body;
+        const { titre } = req.body;
         const userId = req.user.id;
         if (!req.file) {
             res.status(400).json({ error: "Aucun fichier fourni." });
@@ -89,6 +89,7 @@ const createFile = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
         }
         // Ici, TypeScript sait que req.file n'est plus undefined
         const { size } = req.file;
+        const socketId = req.body.socketId;
         const dateTime = giveCurrentDateTime();
         const passThrough = new stream_1.PassThrough();
         const archive = (0, archiver_1.default)("zip", { zlib: { level: 9 } });
@@ -101,7 +102,8 @@ const createFile = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
             res.status(500).json({ message: "Internal server error" });
         });
         archive.on("end", () => __awaiter(void 0, void 0, void 0, function* () {
-            (0, app_2.sendSSE)(clientId, { progress: Math.floor(Number(100)) }, "compressProgress");
+            console.log("Compression terminée !");
+            server_1.io.to(socketId).emit("compressProgress", { progress: 100 });
         }));
         archive.pipe(passThrough);
         archive.append(req.file.buffer, { name: req.file.originalname });
@@ -110,14 +112,12 @@ const createFile = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
         const metadata = { contentType: "application/zip" };
         const chunks = [];
         let processedsize = 0;
-        let lastProgress = 0;
         passThrough.on("data", (chunk) => {
             processedsize += chunk.length;
-            const uploadPercent = ((processedsize / archive.pointer()) * 100).toFixed(2);
-            if (parseInt(uploadPercent) > lastProgress) {
-                lastProgress = parseInt(uploadPercent);
-                (0, app_2.sendSSE)(clientId, { progress: Math.floor(parseInt(uploadPercent)) }, "compressProgress");
-            }
+            const uploadPercent = ((processedsize / size) * 100).toFixed(2);
+            server_1.io.to(socketId).emit("compressProgress", {
+                progress: Math.floor(Number(uploadPercent)),
+            });
             chunks.push(chunk);
         });
         passThrough.on("end", () => {
@@ -127,10 +127,11 @@ const createFile = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
             let lastUploadProgress = 0; //  0% (upload)
             uploadTask.on("state_changed", (snapshot) => {
                 const uploadPercent = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
+                console.log("Upload en cours :", uploadPercent);
                 const totalProgress = Math.floor(uploadPercent);
                 if (totalProgress > lastUploadProgress) {
                     for (let i = lastUploadProgress + 1; i <= totalProgress; i++) {
-                        (0, app_2.sendSSE)(clientId, { progress: Math.floor(Number(uploadPercent)) }, "uploadProgress");
+                        server_1.io.to(socketId).emit("uploadProgress", { progress: i });
                     }
                     lastUploadProgress = totalProgress;
                 }
@@ -138,6 +139,8 @@ const createFile = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
                 console.error("Erreur d'upload :", error);
             }, () => __awaiter(void 0, void 0, void 0, function* () {
                 const downloadURL = yield (0, storage_1.getDownloadURL)(uploadTask.snapshot.ref);
+                console.log("Upload terminé !");
+                server_1.io.emit("uploadCompleted");
                 const taille = uploadTask.snapshot.bytesTransferred;
                 const shortId = generateShortId();
                 const expirationDate = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
@@ -244,6 +247,7 @@ const deleteExpiredFiles = () => __awaiter(void 0, void 0, void 0, function* () 
                     console.error(`Erreur lors de la suppression du fichier ${file.titre} de la base de données :`, deleteDbError);
                     continue; // Passer au fichier suivant en cas d'erreur
                 }
+                console.log(`Fichier supprimé : ${file.titre}`);
             }
         }
     }

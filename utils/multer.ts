@@ -29,7 +29,13 @@ export const handleUploadErrors = (
   next: NextFunction
 ) => {
   if (err instanceof MulterError) {
-    res.status(400).json({ success: false, error: "Message..." });
+    res.status(400).json({
+      success: false,
+      error:
+        err.code === "LIMIT_FILE_SIZE"
+          ? "Le fichier dépasse la taille maximale autorisée (500MB)"
+          : "Erreur lors du téléchargement du fichier",
+    });
     return;
   }
 

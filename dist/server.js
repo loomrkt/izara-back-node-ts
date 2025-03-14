@@ -36,7 +36,9 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.io = void 0;
 const http = __importStar(require("http"));
+const socket_io_1 = require("socket.io");
 const app_1 = __importDefault(require("./app"));
 const normalizePort = (val) => {
     const port = parseInt(val, 10);
@@ -71,6 +73,15 @@ const errorHandler = (error) => {
 };
 // Créer le serveur HTTP
 const server = http.createServer(app_1.default);
+// Initialiser Socket.IO
+exports.io = new socket_io_1.Server(server, { cors: { origin: "*" } });
+// Gérer les événements Socket.IO
+exports.io.on("connection", (socket) => {
+    console.log("Un client s'est connecté :", socket.id);
+    socket.on("disconnect", () => {
+        console.log("Un client s'est déconnecté :", socket.id);
+    });
+});
 server.on("error", errorHandler);
 server.on("listening", () => {
     const address = server.address();

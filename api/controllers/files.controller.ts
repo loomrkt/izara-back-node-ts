@@ -12,7 +12,7 @@ import {
 import archiver from "archiver";
 import { PassThrough } from "stream";
 import * as crypto from "crypto";
-import { sendSSE } from "../../app";
+import { io } from "../../server";
 
 interface User {
   id: string;
@@ -46,7 +46,7 @@ export const getFiles = async (req: Request, res: Response) => {
 // Create file with user association
 export const createFile = async (req: Request, res: Response) => {
   try {
-    const { titre, clientId } = req.body;
+    const { titre } = req.body;
     const userId = (req.user as User).id;
 
     if (!req.file) {
@@ -56,6 +56,7 @@ export const createFile = async (req: Request, res: Response) => {
 
     // Ici, TypeScript sait que req.file n'est plus undefined
     const { size } = req.file;
+    const socketId = req.body.socketId;
 
     const dateTime = giveCurrentDateTime();
     const passThrough = new PassThrough();
@@ -72,11 +73,8 @@ export const createFile = async (req: Request, res: Response) => {
     });
 
     archive.on("end", async () => {
-      sendSSE(
-        clientId,
-        { progress: Math.floor(Number(100)) },
-        "compressProgress"
-      );
+      console.log("Compression terminée !");
+      io.to(socketId).emit("compressProgress", { progress: 100 });
     });
 
     archive.pipe(passThrough);
@@ -88,20 +86,12 @@ export const createFile = async (req: Request, res: Response) => {
 
     const chunks: Buffer[] = [];
     let processedsize = 0;
-    let lastProgress = 0;
     passThrough.on("data", (chunk) => {
       processedsize += chunk.length;
-      const uploadPercent = ((processedsize / archive.pointer()) * 100).toFixed(
-        2
-      );
-      if (parseInt(uploadPercent) > lastProgress) {
-        lastProgress = parseInt(uploadPercent);
-        sendSSE(
-          clientId,
-          { progress: Math.floor(parseInt(uploadPercent)) },
-          "compressProgress"
-        );
-      }
+      const uploadPercent = ((processedsize / size) * 100).toFixed(2);
+      io.to(socketId).emit("compressProgress", {
+        progress: Math.floor(Number(uploadPercent)),
+      });
       chunks.push(chunk);
     });
     passThrough.on("end", () => {
@@ -116,14 +106,11 @@ export const createFile = async (req: Request, res: Response) => {
         (snapshot) => {
           const uploadPercent =
             (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
+          console.log("Upload en cours :", uploadPercent);
           const totalProgress = Math.floor(uploadPercent);
           if (totalProgress > lastUploadProgress) {
             for (let i = lastUploadProgress + 1; i <= totalProgress; i++) {
-              sendSSE(
-                clientId,
-                { progress: Math.floor(Number(uploadPercent)) },
-                "uploadProgress"
-              );
+              io.to(socketId).emit("uploadProgress", { progress: i });
             }
             lastUploadProgress = totalProgress;
           }
@@ -133,6 +120,8 @@ export const createFile = async (req: Request, res: Response) => {
         },
         async () => {
           const downloadURL = await getDownloadURL(uploadTask.snapshot.ref);
+          console.log("Upload terminé !");
+          io.emit("uploadCompleted");
 
           const taille = uploadTask.snapshot.bytesTransferred;
           const shortId = generateShortId();
@@ -264,6 +253,7 @@ const deleteExpiredFiles = async () => {
           continue; // Passer au fichier suivant en cas d'erreur
         }
 
+        console.log(`Fichier supprimé : ${file.titre}`);
       }
     }
   } catch (error) {

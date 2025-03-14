@@ -10,6 +10,6 @@ const auth_middleware_1 = require("../../middlewares/auth.middleware");
 const router = express_1.default.Router();
 router.get("/", auth_middleware_1.verifyAccessToken, files_controller_1.getFiles);
 router.get("/:hash", files_controller_1.unshorteen);
-router.post("/", auth_middleware_1.verifyAccessToken, multer_1.upload.single("file"), multer_1.handleUploadErrors, files_controller_1.createFile);
+router.post("/", auth_middleware_1.verifyAccessToken, multer_1.upload.single("file"), files_controller_1.createFile, multer_1.handleUploadErrors);
 router.delete("/:id", auth_middleware_1.verifyAccessToken, files_controller_1.deleteFile);
 exports.default = router;

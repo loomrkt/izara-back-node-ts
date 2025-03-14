@@ -16,8 +16,8 @@ router.post(
   "/",
   verifyAccessToken,
   upload.single("file"),
-  handleUploadErrors,
-  createFile
+  createFile,
+  handleUploadErrors
 );
 router.delete("/:id", verifyAccessToken, deleteFile);
 export default router;
